@@ -1,0 +1,3086 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CSIA Campo - Chumbagua</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F4F6F4;min-height:100vh;font-size:14px;color:#111827}
+.app{max-width:480px;margin:0 auto;padding:0 0 5rem;min-height:100vh}
+
+/* === LOGIN === */
+.login-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;background:linear-gradient(160deg,#F4F6F4 0%,#E1F5EE 100%)}
+.login-logo{width:80px;height:80px;background:linear-gradient(135deg,#1D9E75 0%,#0F6E56 100%);border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:1.5rem;box-shadow:0 8px 24px rgba(29,158,117,0.25)}
+.login-logo svg{width:64px;height:64px}
+.login-card{background:white;border-radius:20px;padding:2rem;width:100%;max-width:360px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:0.5px solid rgba(0,0,0,0.05)}
+.login-card h2{font-size:22px;font-weight:600;color:#111827;margin-bottom:6px;letter-spacing:-0.01em}
+.login-card p{font-size:13px;color:#6b7280;margin-bottom:1.75rem}
+.login-field{margin-bottom:14px}
+.login-field label{display:block;font-size:12px;font-weight:500;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em}
+.login-field input{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:15px;background:#FAFAFA;color:#111827;transition:all 0.15s}
+.login-field input:focus{outline:none;border-color:#1D9E75;background:white;box-shadow:0 0 0 3px rgba(29,158,117,0.1)}
+.login-btn{width:100%;padding:14px;background:linear-gradient(135deg,#1D9E75 0%,#0F6E56 100%);color:white;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px;transition:transform 0.1s;letter-spacing:0.02em}
+.login-btn:active{transform:scale(0.98)}
+.login-btn:disabled{background:#9ca3af;cursor:not-allowed}
+.login-error{background:#FEE2E2;color:#B91C1C;padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:12px;display:none}
+.login-loading{text-align:center;color:#6b7280;font-size:13px;padding:8px;display:none}
+
+/* === HEADER === */
+.header{background:linear-gradient(135deg,#1D9E75 0%,#0F6E56 100%);padding:1rem 1.25rem;color:white;flex-shrink:0;position:sticky;top:0;z-index:20}
+.header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.header-brand{display:flex;align-items:center;gap:10px;flex:1}
+.header-logo{width:40px;height:40px;background:rgba(255,255,255,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.header-logo svg{width:28px;height:28px}
+.header h1{font-size:15px;font-weight:500;line-height:1.2}
+.header .user{font-size:11px;opacity:0.85;margin-top:2px}
+.header .rol{font-size:10px;opacity:0.7;text-transform:uppercase;letter-spacing:0.06em;margin-top:1px}
+.header .fecha{font-size:11px;opacity:0.85;margin-top:8px}
+.logout-btn{display:flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);border:none;color:white;padding:6px 10px;border-radius:8px;font-size:11px;cursor:pointer;font-weight:500}
+.logout-btn:active{background:rgba(255,255,255,0.28)}
+.logout-btn i{font-size:13px}
+.header-back{width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;color:white;font-size:18px;flex-shrink:0}
+
+/* Campana de notificaciones */
+.notif-btn{position:relative;width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,0.18);border:none;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:6px;padding:0;font-size:18px}
+.notif-btn:active{background:rgba(255,255,255,0.28)}
+.notif-badge{position:absolute;top:-3px;right:-3px;background:#E24B4A;color:white;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #1D9E75;font-family:-apple-system,sans-serif}
+
+/* Panel de notificaciones */
+.notif-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:150;display:none}
+.notif-panel-overlay.open{display:block}
+.notif-panel{position:fixed;top:0;right:0;width:100%;max-width:380px;height:100%;background:white;z-index:160;transform:translateX(100%);transition:transform 0.25s ease;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,0.1)}
+.notif-panel.open{transform:translateX(0)}
+.notif-panel-head{padding:1.1rem 1.2rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#1D9E75;color:white}
+.notif-panel-head h3{font-size:16px;font-weight:600}
+.notif-panel-close{background:rgba(255,255,255,0.2);border:none;color:white;width:30px;height:30px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px}
+.notif-panel-body{flex:1;overflow-y:auto;padding:0}
+.notif-item{padding:0.9rem 1.2rem;border-bottom:1px solid #f3f4f6;cursor:pointer;transition:background 0.12s;position:relative}
+.notif-item:active{background:#F9FAFB}
+.notif-item.no-leida{background:#F0FDF4}
+.notif-item.no-leida::before{content:'';position:absolute;left:6px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:#1D9E75}
+.notif-item-titulo{font-size:13px;font-weight:600;color:#111827;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.notif-item-msg{font-size:12px;color:#6b7280;line-height:1.4}
+.notif-item-time{font-size:11px;color:#9ca3af;margin-top:5px}
+.notif-panel-foot{padding:0.7rem 1.2rem;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;background:#FAFAFA}
+.notif-marcar-todo{background:none;border:none;color:#1D9E75;font-size:12px;font-weight:500;cursor:pointer;padding:4px 8px;border-radius:4px}
+.notif-marcar-todo:disabled{color:#9ca3af;cursor:not-allowed}
+.notif-empty{padding:3rem 1.5rem;text-align:center;color:#9ca3af}
+.notif-empty i{font-size:42px;display:block;margin-bottom:8px;opacity:0.5}
+
+/* === TABS === */
+.tabs{display:flex;background:white;border-bottom:0.5px solid #e5e7eb;position:sticky;top:0;z-index:5}
+.tab{flex:1;padding:13px 4px;font-size:12px;font-weight:500;border:none;background:none;color:#9ca3af;cursor:pointer;border-bottom:2px solid transparent;transition:color 0.15s}
+.tab.active{color:#1D9E75;border-bottom-color:#1D9E75;font-weight:600}
+
+/* === SECTIONS === */
+.sec{display:none;padding:1rem;gap:0.75rem;flex-direction:column}
+.sec.active{display:flex}
+
+/* === CARDS === */
+.card{background:white;border-radius:14px;padding:1rem 1.25rem;border:0.5px solid #e5e7eb}
+.card-title{font-size:10px;font-weight:600;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.06em}
+
+/* === STATS === */
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px}
+.stat-grid.cols-2{grid-template-columns:repeat(2,1fr)}
+.stat{background:white;border-radius:12px;padding:12px 8px;text-align:center;border:0.5px solid #e5e7eb}
+.stat-lbl{font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.04em;font-weight:600}
+.stat-val{font-size:22px;font-weight:600;color:#111827;margin-top:2px;letter-spacing:-0.01em}
+.stat-val.ok{color:#1D9E75}
+.stat-val.warn{color:#BA7517}
+.stat-val.danger{color:#A32D2D}
+
+/* === LISTAS === */
+.sec-h{font-size:10px;font-weight:600;color:#9ca3af;margin:8px 0 0;text-transform:uppercase;letter-spacing:0.06em;display:flex;justify-content:space-between;align-items:center}
+
+/* === TAREA CARD (con ícono lateral) === */
+.tarea-card{background:white;border-radius:14px;padding:14px;border:0.5px solid #e5e7eb;cursor:pointer;transition:transform 0.1s,box-shadow 0.15s;display:flex;flex-direction:column;gap:6px}
+.tarea-card:active{transform:scale(0.99)}
+.tarea-card.estado-pendiente,.tarea-card.estado-planificado{border-left:3px solid #B4B2A9}
+.tarea-card.estado-en_curso{border-left:3px solid #EF9F27}
+.tarea-card.estado-completada{border-left:3px solid #1D9E75}
+.tarea-card.estado-modificada{border-left:3px solid #378ADD}
+.tarea-card.estado-no_ejecutable{border-left:3px solid #E24B4A}
+.tarea-card.estado-esperando_supervisor,.tarea-card.estado-esperando_encargado{border-left:3px solid #7F77DD;background:#FBFAFE;border-color:#CECBF6}
+.tarea-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.tarea-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.tarea-icon{width:36px;height:36px;border-radius:10px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tarea-icon i{font-size:18px;color:#0F6E56}
+.tarea-icon.amber{background:#FAEEDA}
+.tarea-icon.amber i{color:#854F0B}
+.tarea-icon.purple{background:#EEEDFE}
+.tarea-icon.purple i{color:#3C3489}
+.tarea-icon.blue{background:#E6F1FB}
+.tarea-icon.blue i{color:#0C447C}
+.tarea-icon.gray{background:#F1EFE8}
+.tarea-icon.gray i{color:#444441}
+.tarea-icon.green{background:#EAF3DE}
+.tarea-icon.green i{color:#3B6D11}
+.tarea-icon.pink{background:#FBEAF0}
+.tarea-icon.pink i{color:#993556}
+.tarea-info{flex:1;min-width:0}
+.tarea-hora{font-size:11px;color:#6b7280;font-variant-numeric:tabular-nums;font-weight:500}
+.tarea-title{font-size:14px;font-weight:500;color:#111827;line-height:1.2;margin-top:1px}
+.tarea-tags{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.tarea-sub{font-size:12px;color:#6b7280;margin-top:2px}
+.tarea-meta{font-size:11px;color:#9ca3af}
+.tarea-meta strong{color:#854F0B;font-weight:500}
+
+/* === BADGES === */
+.badge{font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;display:inline-block;white-space:nowrap}
+.b-planificado,.b-pendiente{background:#F1EFE8;color:#444441}
+.b-en_curso{background:#FAEEDA;color:#854F0B}
+.b-completada{background:#E1F5EE;color:#0F6E56}
+.b-modificada{background:#E6F1FB;color:#0C447C}
+.b-no_ejecutable{background:#FCEBEB;color:#791F1F}
+.b-esperando_supervisor,.b-esperando_encargado{background:#EEEDFE;color:#3C3489;font-weight:700}
+.b-prio-alta{background:#FCEBEB;color:#791F1F;font-size:9px;padding:2px 6px;font-weight:700}
+.b-prio-media{background:#FAEEDA;color:#854F0B;font-size:9px;padding:2px 6px}
+.b-prio-baja{background:#F1EFE8;color:#444441;font-size:9px;padding:2px 6px}
+.badge.fp{background:#FEE2E2;color:#B91C1C}
+
+/* === PROGRESS === */
+.prog{height:5px;background:#f0f0eb;border-radius:3px;overflow:hidden;margin-top:8px}
+.prog-fill{height:100%;background:#1D9E75;transition:width 0.3s}
+.prog-fill.warn{background:#EF9F27}
+.prog-fill.danger{background:#E24B4A}
+
+/* === SEMÁFORO === */
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:#1D9E75}
+.dot.alerta{background:#EF9F27}
+.dot.critico{background:#E24B4A}
+
+/* === BANNERS === */
+.banner{background:linear-gradient(135deg,#E1F5EE 0%,#F4F6F4 100%);border-radius:14px;padding:14px;border-left:3px solid #1D9E75;margin-bottom:4px}
+.banner.blue{background:linear-gradient(135deg,#E6F1FB 0%,#F4F6F4 100%);border-left-color:#378ADD}
+.banner.amber{background:linear-gradient(135deg,#FAEEDA 0%,#F4F6F4 100%);border-left-color:#EF9F27}
+.banner.purple{background:linear-gradient(135deg,#EEEDFE 0%,#F4F6F4 100%);border-left-color:#7F77DD}
+.banner.red{background:linear-gradient(135deg,#FCEBEB 0%,#F4F6F4 100%);border-left-color:#E24B4A}
+.banner-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#0F6E56}
+.banner.blue .banner-lbl{color:#0C447C}
+.banner.amber .banner-lbl{color:#854F0B}
+.banner.purple .banner-lbl{color:#3C3489}
+.banner.red .banner-lbl{color:#791F1F}
+.banner-txt{font-size:13px;color:#04342C;margin-top:4px;font-weight:500}
+.banner.blue .banner-txt{color:#042C53}
+.banner.amber .banner-txt{color:#412402}
+.banner.purple .banner-txt{color:#26215C}
+.banner.red .banner-txt{color:#501313}
+
+/* === FORMS === */
+label{display:block;font-size:12px;color:#374151;margin-bottom:5px;font-weight:500}
+input,select,textarea{width:100%;font-size:15px;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:10px;background:#FAFAFA;color:#111827;transition:all 0.15s;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#1D9E75;background:white;box-shadow:0 0 0 3px rgba(29,158,117,0.1)}
+textarea{height:65px;resize:none}
+.field{margin-bottom:14px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.field-row .field{margin-bottom:0}
+.field-help{font-size:11px;color:#9ca3af;margin-top:4px;font-style:italic}
+
+/* === BUTTONS === */
+.btn{width:100%;padding:13px;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:transform 0.1s;font-family:inherit}
+.btn:active{transform:scale(0.98)}
+.btn-primary{background:linear-gradient(135deg,#1D9E75 0%,#0F6E56 100%);color:white}
+.btn-primary:disabled{background:#9ca3af;cursor:not-allowed;transform:none}
+.btn-secondary{background:white;color:#374151;border:1px solid #e5e7eb}
+.btn-purple{background:linear-gradient(135deg,#7F77DD 0%,#534AB7 100%);color:white}
+.btn-danger{background:#E24B4A;color:white}
+.btn-sm{padding:8px 12px;font-size:12px;width:auto}
+
+/* === COUNTER === */
+.counter{display:flex;align-items:center;gap:8px;margin-top:4px}
+.cbtn{width:34px;height:34px;border:1.5px solid #e5e7eb;border-radius:10px;background:#FAFAFA;color:#374151;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.cval{font-size:20px;font-weight:600;min-width:28px;text-align:center}
+
+/* === CHECKBOX ROW === */
+.check-row{display:flex;align-items:center;gap:10px;padding:11px 14px;background:#FAFAFA;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;margin-top:4px;transition:all 0.15s}
+.check-row.checked{background:#E1F5EE;border-color:#1D9E75}
+.check-row input{width:18px;height:18px;margin:0;flex-shrink:0;cursor:pointer;accent-color:#1D9E75}
+.check-row label{margin:0;cursor:pointer;font-size:13px;color:#374151;flex:1}
+
+/* === DETALLE === */
+.detail-section{background:white;border-radius:14px;padding:14px;margin-bottom:8px;border:0.5px solid #e5e7eb}
+.detail-lbl{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px}
+.detail-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0}
+.detail-row .key{color:#6b7280}
+.detail-row .val{color:#111827;font-weight:500;text-align:right}
+
+/* === PARTES (operaciones compartidas) === */
+.parte{border-radius:14px;padding:14px;margin-bottom:8px;border:0.5px solid}
+.parte-supervisor{background:linear-gradient(135deg,#E1F5EE 0%,#FAFAFA 100%);border-color:#9FE1CB}
+.parte-supervisor .detail-lbl{color:#0F6E56}
+.parte-encargado{background:linear-gradient(135deg,#E6F1FB 0%,#FAFAFA 100%);border-color:#85B7EB}
+.parte-encargado .detail-lbl{color:#0C447C}
+.parte-vacia{background:#FAEEDA;border:2px dashed #BA7517;text-align:center;padding:20px}
+.parte-vacia .detail-lbl{color:#854F0B;margin-bottom:6px}
+.firma{font-size:10px;color:#9ca3af;margin-top:8px;font-style:italic}
+
+/* === ACTIVIDAD GRID (selector) === */
+.act-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.act-btn{padding:14px 8px;font-size:12px;font-weight:500;border:1.5px solid #e5e7eb;border-radius:12px;background:#FAFAFA;color:#374151;cursor:pointer;text-align:center;line-height:1.3;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all 0.15s;font-family:inherit}
+.act-btn:active{transform:scale(0.98)}
+.act-btn.sel{background:#E1F5EE;color:#0F6E56;border-color:#1D9E75}
+.act-btn i{font-size:22px;color:#1D9E75}
+.act-btn.sel i{color:#0F6E56}
+
+/* === FERTIRRIEGO TURNOS === */
+.turno-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:6px}
+.turno-btn{padding:12px 4px;font-size:14px;font-weight:600;border:1.5px solid #e5e7eb;border-radius:10px;background:#FAFAFA;color:#6b7280;cursor:pointer;text-align:center}
+.turno-btn.sel{background:linear-gradient(135deg,#1D9E75 0%,#0F6E56 100%);color:white;border-color:#0F6E56}
+.turno-btn.done{background:#E1F5EE;color:#0F6E56;border-color:#bbf7d0;cursor:not-allowed}
+
+/* === INFO LOTE === */
+.info-lote{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px;margin-top:8px;display:none}
+.info-lote.show{display:block}
+.info-lote-title{font-size:12px;color:#166534;font-weight:600;margin-bottom:4px}
+.info-lote-row{display:flex;justify-content:space-between;font-size:12px;color:#166534;margin-bottom:2px}
+.info-lote-warn{background:#FEF3C7;color:#92400E;padding:6px 10px;border-radius:6px;font-size:11px;margin-top:6px;display:none}
+
+/* === HISTORIAL === */
+.reg-item{background:white;border-radius:14px;padding:0.9rem 1.1rem;border:0.5px solid #e5e7eb;margin-bottom:8px}
+.reg-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.reg-fecha{font-size:11px;color:#9ca3af}
+.reg-finca{font-size:14px;font-weight:500;color:#111827;margin-bottom:2px}
+.reg-meta{font-size:12px;color:#6b7280}
+
+/* === EMPTY === */
+.empty{text-align:center;padding:2.5rem 1rem;color:#9ca3af;font-size:13px;line-height:1.5}
+.empty i{font-size:32px;display:block;margin-bottom:8px;color:#d1d5db}
+
+/* === TOAST === */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#111827;color:white;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;transition:transform 0.3s;z-index:999;max-width:90vw;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.error{background:#B91C1C}
+.toast.success{background:#0F6E56}
+.toast.info{background:#0C447C}
+
+/* === MODAL === */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:flex-end;justify-content:center;z-index:100;animation:fadeIn 0.2s;backdrop-filter:blur(4px)}
+.modal{background:white;width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px;max-height:90vh;overflow-y:auto;animation:slideUp 0.25s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(40px)}to{transform:translateY(0)}}
+.modal h2{font-size:18px;font-weight:600;margin-bottom:12px;letter-spacing:-0.01em}
+.modal-close{float:right;background:none;border:none;font-size:22px;color:#9ca3af;cursor:pointer;line-height:1;padding:0;width:32px;height:32px;border-radius:8px}
+.modal-close:active{background:#f0f0eb}
+
+/* === DIVIDER === */
+.divider{height:1px;background:#f0f0eb;margin:10px 0}
+
+/* Chips de filtro */
+.chip{display:inline-flex;align-items:center;gap:6px;background:#f3f4f6;color:#374151;padding:5px 12px;border-radius:16px;border:1px solid #e5e7eb;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;white-space:nowrap}
+.chip:hover{background:#e5e7eb}
+.chip-sel{background:#1D9E75;color:white;border-color:#1D9E75}
+.chip-count{background:rgba(0,0,0,0.15);padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600}
+.chip-sel .chip-count{background:rgba(255,255,255,0.25)}
+
+/* Botón eliminar tarea */
+.btn-eliminar{margin-top:8px;background:white;color:#A32D2D;border:1px solid #FCA5A5;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.btn-eliminar:hover{background:#FEE2E2}
+.btn-eliminar i{font-size:13px}
+
+/* Banner rojo */
+.banner.red{background:#FCE9E9;border-left:3px solid #A32D2D}
+.banner.red .banner-lbl{color:#A32D2D}
+.banner.red .banner-txt{color:#5B1A1A}
+
+@media (max-width:480px){
+  .app{max-width:100%}
+  .modal{border-radius:20px 20px 0 0}
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     LOGIN SCREEN
+============================================================ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-logo">
+    <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+      <g font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="700" fill="#FFFFFF" font-size="27">
+        <text x="2" y="50">C</text>
+        <text x="20" y="50">S</text>
+        <text x="53" y="50">A</text>
+      </g>
+      <g transform="translate(45.5,40)">
+        <rect x="-2.5" y="-10" width="5" height="20" rx="0.8" fill="#FFFFFF"/>
+        <rect x="-2.5" y="-5" width="5" height="0.8" fill="#0F6E56"/>
+        <rect x="-2.5" y="-0.3" width="5" height="0.8" fill="#0F6E56"/>
+        <rect x="-2.5" y="4.5" width="5" height="0.8" fill="#0F6E56"/>
+        <path d="M 2.5,-7 Q 7,-9.5 8.5,-4 Q 5,-3.3 2.5,-3.5 Z" fill="#FFFFFF"/>
+        <path d="M -2.5,-2 Q -7,-4.5 -8.5,1 Q -5,1.7 -2.5,1.5 Z" fill="#FFFFFF"/>
+      </g>
+    </svg>
+  </div>
+  <div class="login-card">
+    <h2>CSIA Campo</h2>
+    <p>Sistema de programación y captura · Chumbagua</p>
+    <div id="loginError" class="login-error"></div>
+    <div id="loginLoading" class="login-loading">Verificando...</div>
+    <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="inputEmail" placeholder="usuario@chumbagua.com" autocomplete="username"/>
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="inputPass" placeholder="Tu contraseña" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()"/>
+    </div>
+    <button class="login-btn" id="btnLogin" onclick="login()">Ingresar</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     APP PRINCIPAL (3 vistas dinámicas según rol)
+============================================================ -->
+<div id="mainApp" style="display:none">
+  <div class="app">
+    <div class="header" id="appHeader"></div>
+    <div id="appBody"></div>
+  </div>
+</div>
+
+<div class="notif-panel-overlay" id="notifOverlay" onclick="cerrarPanelNotif()"></div>
+<div class="notif-panel" id="notifPanel">
+  <div class="notif-panel-head">
+    <h3><i class="ti ti-bell"></i> Notificaciones</h3>
+    <button class="notif-panel-close" onclick="cerrarPanelNotif()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="notif-panel-body" id="notifPanelBody">
+    <div class="notif-empty"><i class="ti ti-bell-off"></i><div>Cargando...</div></div>
+  </div>
+  <div class="notif-panel-foot">
+    <span style="font-size:11px;color:#9ca3af" id="notifFootInfo">—</span>
+    <button class="notif-marcar-todo" id="notifMarcarTodo" onclick="marcarTodasLeidas()">Marcar todas como leídas</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CSIA Campo v3 - Frontend completo
+   Estructura: Login → Detección de rol → Vista (Jefe/Encargado/Supervisor)
+   Las queries van directamente contra Supabase reusando el mismo
+   patrón que index.html (que sigue funcionando en paralelo).
+============================================================ */
+
+// === CONFIG ===
+const SUPABASE_URL = 'https://dhbyjqmdcezdiucxeqpp.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRoYnlqcW1kY2V6ZGl1Y3hlcXBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzEzMjY2MSwiZXhwIjoyMDkyNzA4NjYxfQ.zs3TkSbu2QTOfF1XV3qsiIO9R4Iv3nu8I9u1xNLd-e4';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// === ESTADO GLOBAL ===
+let usuario = null;          // perfil del usuario logueado
+let plantios = [];           // todos los lotes accesibles (filtrados por permisos)
+let actividadesPerm = [];    // actividades que el usuario puede capturar
+let actividadesAll = [];     // catálogo completo de actividades (para nombres)
+let jerarquia = {};          // { 'DISTRITO N': { jefe, encargados:[{nombre, email, fincas:[{codigo,nombre,lotes,tipo_riego}]}] } }
+let currentTab = '';
+let currentDetailId = null;
+let modalContent = null;
+let captureMode = null;      // 'libre' | 'plan'
+let captureContext = null;
+
+// Estado captura
+let actSel = null;
+let fertirriegoActual = null;
+let turnoSeleccionado = null;
+
+// === HELPERS ===
+function toast(msg, tipo='success'){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + tipo;
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+function fmtFecha(iso, mostrarHora=true){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  const opts = {day:'numeric', month:'short'};
+  if(mostrarHora) Object.assign(opts, {hour:'2-digit', minute:'2-digit'});
+  return d.toLocaleDateString('es-HN', opts);
+}
+
+function fmtHoy(){
+  return new Date().toLocaleDateString('es-HN', {weekday:'long', day:'numeric', month:'long'});
+}
+
+function hoyISO(){
+  return new Date().toISOString().split('T')[0];
+}
+
+function badge(estado){
+  const labels = {
+    planificado:'Planificado', pendiente:'Pendiente', en_curso:'En curso',
+    completada:'Completada', modificada:'Modificada', no_ejecutable:'No ejecutable',
+    esperando_supervisor:'Esperando supervisor', esperando_encargado:'Aporta tu parte',
+    reprogramada:'Reprogramada'
+  };
+  return `<span class="badge b-${estado}">${labels[estado] || estado}</span>`;
+}
+
+function actNombre(codigo){
+  const a = actividadesAll.find(x => x.codigo_actividad === codigo);
+  return a ? a.nombre_actividad : 'Actividad ' + codigo;
+}
+
+function esCompartida(codigo){
+  // Una actividad es "compartida" si su modelo es COMPARTIDA o EXTERNA
+  // (en ambos casos el encargado aporta solo personal y el supervisor/PM lo demás)
+  const a = actividadesAll.find(x => x.codigo_actividad === codigo);
+  if(!a) return false;
+  return a.modelo_comparticion === 'COMPARTIDA' || a.modelo_comparticion === 'EXTERNA';
+}
+
+function iconoActividad(codigo){
+  // Mapeo de códigos a íconos Tabler + color de fondo
+  // Devuelve { icon, color } donde color es la clase CSS: green, amber, blue, purple, pink, gray
+  const a = actividadesAll.find(x => x.codigo_actividad === codigo);
+  const nombre = (a?.nombre_actividad || '').toLowerCase();
+
+  if(codigo >= 10101 && codigo <= 10119) return { icon: 'ti-plant', color: 'amber' };
+  if(codigo === 10220 || (codigo >= 10201 && codigo <= 10219)) return { icon: 'ti-fertilizer', color: 'green' };
+  if(codigo >= 10301 && codigo <= 10314) return { icon: 'ti-leaf', color: 'pink' };
+  if(codigo === 10401 || codigo === 10429 || codigo === 10430) return { icon: 'ti-truck-loading', color: '' };
+  if(codigo >= 10401 && codigo <= 10430) return { icon: 'ti-tractor', color: 'gray' };
+  if(codigo === 10508 || codigo === 10509 || codigo === 50204 || codigo === 50704) return { icon: 'ti-seedling', color: '' };
+  if(codigo >= 10601 && codigo <= 10614) return { icon: 'ti-droplet', color: 'blue' };
+  if(codigo >= 10701 && codigo <= 10714) return { icon: 'ti-droplet-filled', color: 'blue' };
+  if(codigo >= 11401 && codigo <= 11417) return { icon: 'ti-bug', color: 'pink' };
+  if(codigo >= 11501 && codigo <= 11510) return { icon: 'ti-droplet-half-2', color: 'purple' };
+  if(codigo >= 12101 && codigo <= 12206) return { icon: 'ti-droplets', color: 'blue' };
+  if(codigo === 50101 || codigo === 50601) return { icon: 'ti-tractor', color: 'gray' };
+
+  // fallback por nombre
+  if(nombre.includes('siembra') || nombre.includes('resiembra')) return { icon: 'ti-seedling', color: '' };
+  if(nombre.includes('riego') || nombre.includes('drenaje')) return { icon: 'ti-droplet', color: 'blue' };
+  if(nombre.includes('fertili')) return { icon: 'ti-fertilizer', color: 'green' };
+  if(nombre.includes('herbicida') || nombre.includes('maleza')) return { icon: 'ti-plant', color: 'amber' };
+  if(nombre.includes('acarrileo')) return { icon: 'ti-truck-loading', color: '' };
+  if(nombre.includes('madur') || nombre.includes('inhibi')) return { icon: 'ti-leaf', color: 'pink' };
+  if(nombre.includes('plaga') || nombre.includes('barrenador')) return { icon: 'ti-bug', color: 'pink' };
+  if(nombre.includes('enmienda') || nombre.includes('foliar')) return { icon: 'ti-droplet-half-2', color: 'purple' };
+  if(nombre.includes('despedrado') || nombre.includes('descomp') || nombre.includes('prepar')) return { icon: 'ti-tractor', color: 'gray' };
+
+  return { icon: 'ti-checklist', color: '' };
+}
+
+// === AUTH ===
+async function login(){
+  const email = document.getElementById('inputEmail').value.trim().toLowerCase();
+  const pass = document.getElementById('inputPass').value;
+  const errBox = document.getElementById('loginError');
+  const loadBox = document.getElementById('loginLoading');
+  const btn = document.getElementById('btnLogin');
+
+  errBox.style.display = 'none';
+  if(!email || !pass){
+    errBox.textContent = 'Ingresa email y contraseña';
+    errBox.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  loadBox.style.display = 'block';
+
+  try {
+    const { error: authErr } = await sb.auth.signInWithPassword({ email, password: pass });
+    if(authErr) throw authErr;
+
+    const { data: perfil, error: e2 } = await sb.from('user_perfiles').select('*').eq('email', email).maybeSingle();
+    if(e2 || !perfil) throw new Error('Tu usuario no tiene perfil configurado');
+    if(!perfil.activo) throw new Error('Tu usuario está desactivado');
+    if(!perfil.rol_avc) throw new Error('Tu usuario no tiene rol asignado');
+
+    usuario = perfil;
+    sessionStorage.setItem('usuario', JSON.stringify(perfil));
+    await iniciarApp();
+
+  } catch(err){
+    errBox.textContent = err.message || 'Error de autenticación';
+    errBox.style.display = 'block';
+    btn.disabled = false;
+    loadBox.style.display = 'none';
+  }
+}
+
+async function logout(){
+  detenerPollingNotif();
+  await sb.auth.signOut();
+  sessionStorage.clear();
+  usuario = null;
+  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('inputPass').value = '';
+  document.getElementById('btnLogin').disabled = false;
+  document.getElementById('loginLoading').style.display = 'none';
+}
+
+// === CARGA INICIAL ===
+async function iniciarApp(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+
+  await cargarMaestros();
+  routerPorRol();
+  iniciarPollingNotif();
+}
+
+async function cargarMaestros(){
+  // 1. Catálogo completo de actividades (para resolver nombres)
+  const { data: acts } = await sb.from('avc_actividades').select('*').eq('activa', true).order('codigo_actividad');
+  actividadesAll = acts || [];
+
+  // 2. Plantíos (lotes) - filtrados por permisos si es usuario regular
+  const esAdmin = usuario.rol_avc === 'admin' || usuario.rol_avc === 'programador';
+  let queryP = sb.from('maestro_plantios').select('finca_lote, finca, descripcion_finca, area_ha, variedad, tipo_riego, jefe_distrito, encargado_finca, distrito');
+
+  if(!esAdmin){
+    // Encargado: solo sus fincas. Supervisor: todas (cruza distritos). Jefe: las de su distrito.
+    if(usuario.rol_avc === 'encargado_finca'){
+      queryP = queryP.eq('encargado_finca', usuario.nombre_completo);
+    } else if(usuario.rol_avc === 'jefe_distrito'){
+      queryP = queryP.eq('jefe_distrito', usuario.nombre_completo);
+    }
+    // supervisor_actividad ve todo, filtrado luego por actividad
+  }
+
+  const { data: pl } = await queryP;
+  plantios = pl || [];
+
+  // 3. Permisos de actividades (para supervisores y encargados)
+  if(esAdmin){
+    actividadesPerm = actividadesAll;
+  } else {
+    const { data: ua } = await sb.from('avc_usuario_actividades')
+      .select('codigo_actividad, avc_actividades(*)')
+      .eq('email', usuario.email);
+    actividadesPerm = (ua || []).map(r => r.avc_actividades).filter(a => a && a.activa);
+  }
+
+  // 4. Armar jerarquía completa (necesaria para vista del jefe y "asignar a quién")
+  await cargarJerarquia();
+}
+
+async function cargarJerarquia(){
+  // Traer todos los plantios (sin filtro, para construir el árbol)
+  // Pero solo si soy admin o jefe - para encargados/supervisores no es necesario
+  if(!['admin','programador','jefe_distrito','supervisor_actividad'].includes(usuario.rol_avc)) return;
+
+  const { data: all } = await sb.from('maestro_plantios')
+    .select('finca, descripcion_finca, lote, tipo_riego, jefe_distrito, encargado_finca, distrito')
+    .not('jefe_distrito','is',null)
+    .not('encargado_finca','is',null);
+
+  // Traer emails de encargados (cross-ref nombre -> email)
+  const { data: encUsers } = await sb.from('user_perfiles')
+    .select('email, nombre_completo')
+    .eq('rol_avc', 'encargado_finca')
+    .eq('activo', true);
+  const encMap = {};
+  (encUsers || []).forEach(u => { encMap[u.nombre_completo] = u.email; });
+
+  jerarquia = {};
+  (all || []).forEach(p => {
+    if(!jerarquia[p.distrito]){
+      jerarquia[p.distrito] = { jefe: p.jefe_distrito, encargados: {} };
+    }
+    const d = jerarquia[p.distrito];
+    if(!d.encargados[p.encargado_finca]){
+      d.encargados[p.encargado_finca] = {
+        nombre: p.encargado_finca,
+        email: encMap[p.encargado_finca] || null,
+        fincas: {}
+      };
+    }
+    const e = d.encargados[p.encargado_finca];
+    if(!e.fincas[p.finca]){
+      e.fincas[p.finca] = {
+        codigo: p.finca,
+        nombre: p.descripcion_finca,
+        tipo_riego: p.tipo_riego,
+        lotes: []
+      };
+    }
+    e.fincas[p.finca].lotes.push(p.lote);
+  });
+
+  // Convertir Maps a Arrays para fácil iteración
+  Object.values(jerarquia).forEach(d => {
+    d.encargados = Object.values(d.encargados);
+    d.encargados.forEach(e => {
+      e.fincas = Object.values(e.fincas);
+      e.fincas.forEach(f => f.lotes.sort((a,b)=>a-b));
+    });
+    d.encargados.sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  });
+}
+
+function routerPorRol(){
+  if(usuario.rol_avc === 'jefe_distrito')           renderJefe();
+  else if(usuario.rol_avc === 'encargado_finca')    renderEncargado();
+  else if(usuario.rol_avc === 'supervisor_actividad')renderSupervisor();
+  else if(usuario.rol_avc === 'admin' || usuario.rol_avc === 'programador') renderAdmin();
+  else {
+    document.getElementById('appBody').innerHTML = `<div class="empty">Tu rol "${usuario.rol_avc}" todavía no tiene vista en CSIA Campo. Usa la app de captura tradicional.</div>`;
+    renderHeader();
+  }
+}
+
+function renderHeader(opts={}){
+  const back = opts.back ? `<button class="header-back" onclick="${opts.back}"><i class="ti ti-arrow-left"></i></button>` : '';
+  const title = opts.title || 'CSIA Campo';
+  const sub1 = opts.sub1 !== undefined ? opts.sub1 : usuario.nombre_completo;
+  let defaultSub2 = '';
+  if(usuario){
+    if(usuario.rol_avc === 'jefe_distrito'){
+      const d = encontrarDistritoDeJefe(usuario.nombre_completo);
+      defaultSub2 = d ? `Jefe · ${d}` : 'Jefe distrito';
+    } else if(usuario.rol_avc === 'encargado_finca'){
+      const d = encontrarDistritoDeEncargado(usuario.nombre_completo);
+      defaultSub2 = d ? `Encargado · ${d}` : 'Encargado';
+    } else {
+      defaultSub2 = usuario.cargo || usuario.rol_avc.replace(/_/g,' ');
+    }
+  }
+  const sub2 = opts.sub2 !== undefined ? opts.sub2 : defaultSub2;
+  const fecha = opts.fecha !== false ? `<div class="fecha">${fmtHoy()}</div>` : '';
+
+  const logoSVG = `<svg viewBox="0 0 40 40">
+    <g font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="700" fill="#FFFFFF" font-size="13">
+      <text x="1.5" y="25">C</text>
+      <text x="10.5" y="25">S</text>
+      <text x="27.5" y="25">A</text>
+    </g>
+    <g transform="translate(23,20)">
+      <rect x="-1.2" y="-5" width="2.4" height="10" rx="0.5" fill="#FFFFFF"/>
+      <rect x="-1.2" y="-2.5" width="2.4" height="0.6" fill="#0F6E56"/>
+      <rect x="-1.2" y="0" width="2.4" height="0.6" fill="#0F6E56"/>
+      <rect x="-1.2" y="2.5" width="2.4" height="0.6" fill="#0F6E56"/>
+    </g>
+  </svg>`;
+
+  document.getElementById('appHeader').innerHTML = `
+    <div class="header-top">
+      ${back || `<div class="header-logo">${logoSVG}</div>`}
+      <div class="header-brand" style="flex:1${back?';margin-left:0':''}">
+        <div>
+          <h1>${title}</h1>
+          ${sub1 ? `<div class="user">${sub1}</div>` : ''}
+          ${sub2 ? `<div class="rol">${sub2}</div>` : ''}
+        </div>
+      </div>
+      <button class="notif-btn" onclick="togglePanelNotif()" title="Notificaciones">
+        <i class="ti ti-bell"></i>
+        <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+      </button>
+      <button class="logout-btn" onclick="logout()"><i class="ti ti-logout"></i>Salir</button>
+    </div>
+    ${fecha}
+  `;
+  // Actualizar contador al renderizar header
+  if(usuario) actualizarContadorNotif();
+}
+
+function encontrarDistritoDeEncargado(nombre){
+  for(const [d, info] of Object.entries(jerarquia)){
+    if(info.encargados.some(e => e.nombre === nombre)) return d;
+  }
+  return null;
+}
+
+function renderTabs(tabs){
+  return `<div class="tabs">${tabs.map(t =>
+    `<button class="tab ${currentTab===t.id?'active':''}" onclick="setTab('${t.id}')">${t.label}</button>`
+  ).join('')}</div>`;
+}
+
+function setTab(t){
+  currentTab = t;
+  routerPorRol();
+}
+
+/* ============================================================
+   VISTA: JEFE DE DISTRITO
+============================================================ */
+async function renderJefe(){
+  if(!currentTab) currentTab = 'distrito';
+  const tabs = [
+    {id:'distrito', label:'Mi distrito'},
+    {id:'programar', label:'Programar'},
+    {id:'historial', label:'Historial'}
+  ];
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'distrito')      body = await renderJefeDistrito();
+  else if(currentTab === 'programar')body = await renderJefeProgramar();
+  else if(currentTab === 'historial')body = await renderJefeHistorial();
+
+  document.getElementById('appBody').innerHTML = renderTabs(tabs) + `<div class="sec active">${body}</div>`;
+}
+
+async function renderJefeDistrito(){
+  const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
+  if(!distritoNombre) return '<div class="empty">No se encontró tu distrito en maestro_plantios.</div>';
+
+  const distrito = jerarquia[distritoNombre];
+  const hoy = hoyISO();
+
+  // Programaciones del día de mis encargados (no eliminadas)
+  const emailsEnc = distrito.encargados.map(e => e.email).filter(Boolean);
+  let progHoy = [];
+  if(emailsEnc.length > 0){
+    const { data } = await sb.from('avc_programacion')
+      .select('*')
+      .eq('fecha', hoy)
+      .eq('eliminada', false)
+      .in('email_encargado', emailsEnc);
+    progHoy = data || [];
+  }
+
+  // Estadísticas
+  const total = progHoy.length;
+  const completadas = progHoy.filter(p => p.estado === 'completada' || p.estado === 'modificada').length;
+  const haPlan = progHoy.reduce((s,p) => s + parseFloat(p.ha_plan || 0), 0);
+  const haReal = progHoy.reduce((s,p) => s + parseFloat(p.ha_real || 0), 0);
+  const cumpl = total > 0 ? Math.round((completadas / total) * 100) : 0;
+
+  // Resumen por encargado
+  const resumen = distrito.encargados.map(e => {
+    const ops = progHoy.filter(p => p.email_encargado === e.email);
+    const compl = ops.filter(p => p.estado === 'completada' || p.estado === 'modificada').length;
+    const enCurso = ops.filter(p => p.estado === 'en_curso' || p.estado === 'esperando_encargado' || p.estado === 'esperando_supervisor').length;
+    const pend = ops.filter(p => p.estado === 'planificado' || p.estado === 'pendiente').length;
+    const haOk = ops.filter(p => p.estado === 'completada').reduce((s,p) => s + parseFloat(p.ha_real || 0), 0);
+    const haPr = ops.reduce((s,p) => s + parseFloat(p.ha_plan || 0), 0);
+    let semaforo = 'ok';
+    if(ops.length === 0) semaforo = ops.length === 0 && pend === 0 ? 'critico' : 'critico';
+    else if(compl + enCurso < ops.length * 0.5) semaforo = 'alerta';
+    if(ops.length === 0 && pend === 0) semaforo = 'critico';
+    return {
+      ...e,
+      total: ops.length,
+      completadas: compl,
+      en_curso: enCurso,
+      pendientes: pend,
+      ha_real: haOk,
+      ha_plan: haPr,
+      semaforo
+    };
+  });
+
+  let html = `
+    <div class="banner">
+      <div class="banner-lbl">${distritoNombre} · ${distrito.encargados.length} encargados</div>
+      <div class="banner-txt">Avance del día en tiempo real</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Tareas</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">HA hoy</div><div class="stat-val">${haReal.toFixed(1)}</div></div>
+      <div class="stat"><div class="stat-lbl">Cumpl.</div><div class="stat-val ${cumpl>=70?'ok':cumpl>=40?'warn':'danger'}">${cumpl}%</div></div>
+    </div>
+    <div class="sec-h"><span>Mis encargados</span><span style="font-weight:400;color:#9ca3af">${haReal.toFixed(1)} / ${haPlan.toFixed(1)} ha</span></div>
+  `;
+
+  if(resumen.length === 0){
+    html += '<div class="empty"><i class="ti ti-users-group"></i>No hay encargados registrados en tu distrito.</div>';
+  } else {
+    resumen.forEach(e => {
+      const porc = e.total > 0 ? Math.round(((e.completadas + e.en_curso) / e.total) * 100) : 0;
+      const fincas = e.fincas.map(f => f.nombre).join(', ');
+      const iniciales = e.nombre.split(' ').slice(0,2).map(p => p[0]).join('').toUpperCase();
+      const semColor = e.semaforo === 'ok' ? '#1D9E75' : e.semaforo === 'alerta' ? '#EF9F27' : '#E24B4A';
+      html += `<div class="tarea-card" style="border-left:3px solid ${semColor}" onclick="modalEncargado('${e.nombre.replace(/'/g,"\\'")}')">
+        <div class="tarea-head">
+          <div class="tarea-left">
+            <div class="tarea-icon" style="background:#E1F5EE"><span style="font-size:13px;font-weight:600;color:#0F6E56">${iniciales}</span></div>
+            <div class="tarea-info">
+              <div class="tarea-title">${e.nombre}</div>
+              <div class="tarea-sub" style="margin-top:0">${fincas}</div>
+            </div>
+          </div>
+          <div class="dot ${e.semaforo}"></div>
+        </div>
+        <div class="prog"><div class="prog-fill ${e.semaforo==='alerta'?'warn':''} ${e.semaforo==='critico'?'danger':''}" style="width:${porc}%"></div></div>
+        <div class="tarea-meta">
+          ${e.total === 0 ? 'Sin tareas hoy' : `${e.completadas} compl · ${e.en_curso} en curso${e.pendientes?` · ${e.pendientes} pend`:''} · ${e.ha_real.toFixed(1)}/${e.ha_plan.toFixed(1)} ha`}
+        </div>
+      </div>`;
+    });
+  }
+
+  html += `<button class="btn btn-primary" style="margin-top:14px" onclick="setTab('programar')"><i class="ti ti-plus"></i>Programar nueva tarea</button>`;
+  return html;
+}
+
+function encontrarDistritoDeJefe(nombre){
+  for(const [d, info] of Object.entries(jerarquia)){
+    if(info.jefe === nombre) return d;
+  }
+  return null;
+}
+
+async function modalEncargado(nombre){
+  const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
+  const enc = jerarquia[distritoNombre].encargados.find(e => e.nombre === nombre);
+  if(!enc) return;
+
+  const hoy = hoyISO();
+  let progHoy = [];
+  if(enc.email){
+    const { data } = await sb.from('avc_programacion')
+      .select('*')
+      .eq('fecha', hoy)
+      .eq('email_encargado', enc.email)
+      .eq('eliminada', false)
+      .order('hora_programada', { nullsFirst: false });
+    progHoy = data || [];
+  }
+
+  let listaHTML = '<div class="empty"><i class="ti ti-calendar-off"></i>Sin tareas programadas hoy</div>';
+  if(progHoy.length > 0){
+    listaHTML = progHoy.map(p => {
+      const ico = iconoActividad(p.codigo_actividad);
+      return `
+        <div class="tarea-card estado-${p.estado}" style="margin-bottom:6px">
+          <div class="tarea-head">
+            <div class="tarea-left">
+              <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+              <div class="tarea-info">
+                ${p.hora_programada ? `<div class="tarea-hora">${p.hora_programada}</div>` : ''}
+                <div class="tarea-title" style="font-size:13px">${actNombre(p.codigo_actividad)}</div>
+              </div>
+            </div>
+            ${badge(p.estado)}
+          </div>
+          <div class="tarea-sub">${p.finca_lote} · plan ${p.ha_plan} ha${p.ha_real?` · real ${p.ha_real} ha`:''}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>${enc.nombre}</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">${enc.fincas.map(f=>f.nombre).join(', ')}</div>
+    ${listaHTML}
+  `;
+  showModal();
+}
+
+async function renderJefeProgramar(){
+  const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
+  if(!distritoNombre) return '<div class="empty">No se encontró tu distrito.</div>';
+
+  const distrito = jerarquia[distritoNombre];
+  const fechaDefault = hoyISO();
+
+  // Listado de actividades programables (excluir fertirriegos que tienen flujo propio)
+  const actsProg = actividadesAll.filter(a => !a.es_fertirriego);
+
+  // Lista plana de lotes del distrito + lista de fincas
+  const todosLotes = [];
+  const fincasMap = {}; // nombre -> {nombre, codigo}
+  distrito.encargados.forEach(e => {
+    e.fincas.forEach(f => {
+      if(!fincasMap[f.nombre]) fincasMap[f.nombre] = {nombre: f.nombre, codigo: f.codigo};
+      f.lotes.forEach(l => {
+        todosLotes.push({
+          finca_lote: f.codigo + l,
+          finca_nombre: f.nombre,
+          lote_num: l,
+          display: `${f.nombre} · Lote ${l}`,
+          tipo_riego: f.tipo_riego,
+          encargado_nombre: e.nombre,
+          encargado_email: e.email,
+          area_ha: (plantios.find(p => p.finca_lote === f.codigo + l) || {}).area_ha
+        });
+      });
+    });
+  });
+  todosLotes.sort((a,b) => a.display.localeCompare(b.display));
+  const fincasOrdenadas = Object.values(fincasMap).sort((a,b) => a.nombre.localeCompare(b.nombre));
+  
+  // Guardar para acceso desde onFincaChange
+  window._progLotes = todosLotes;
+
+  return `
+    <div class="banner amber">
+      <div class="banner-lbl">Programar nueva tarea</div>
+      <div class="banner-txt">La app deducirá automáticamente a quién asignar según el lote y la actividad</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Datos de la tarea</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Fecha</label>
+          <input type="date" id="progFecha" value="${fechaDefault}"/>
+        </div>
+        <div class="field">
+          <label>Prioridad</label>
+          <select id="progPrioridad">
+            <option value="media" selected>Media</option>
+            <option value="alta">Alta</option>
+            <option value="baja">Baja</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Finca</label>
+          <select id="progFinca" onchange="onFincaChange()">
+            <option value="">Seleccionar finca...</option>
+            ${fincasOrdenadas.map(f => `<option value="${f.nombre}">${f.nombre}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Lote</label>
+          <select id="progLote" onchange="onLoteChange()" disabled>
+            <option value="">Elige una finca primero</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-help" id="loteInfo" style="display:none;margin-top:-8px;margin-bottom:14px"></div>
+      <div class="field">
+        <label>Actividad</label>
+        <select id="progActividad" onchange="onActividadChange()">
+          <option value="">Seleccionar actividad...</option>
+          ${actsProg.map(a => `<option value="${a.codigo_actividad}">${a.codigo_actividad} · ${a.nombre_actividad}</option>`).join('')}
+        </select>
+      </div>
+      
+      <!-- BLOQUE DE AUTO-DEDUCCIÓN -->
+      <div id="progAsignacion" style="display:none"></div>
+
+      <div class="field-row" id="progMetricaRow">
+        <div class="field" id="progHaField">
+          <label id="progMetricaLbl">HA proyectadas</label>
+          <input type="number" step="0.01" id="progHa" placeholder="0.00" oninput="validarAreaPlan()"/>
+        </div>
+        <div class="field" id="progPersonalField">
+          <label>Personal proyectado</label>
+          <input type="number" id="progPersonal" placeholder="0"/>
+        </div>
+      </div>
+      <div class="field-help" id="progMetricaHelp" style="display:none;margin-top:-8px;margin-bottom:14px"></div>
+      <div id="progAreaInfo" style="display:none;margin-top:-6px;margin-bottom:14px;padding:8px 10px;border-radius:6px;font-size:12px"></div>
+      
+      <!-- CAMPOS EXTRAS según tipo_captura -->
+      <div id="progExtras"></div>
+      
+      <div class="field">
+        <label>Hora programada (opcional)</label>
+        <input type="time" id="progHora"/>
+      </div>
+      <div class="field">
+        <label>Observación del plan</label>
+        <textarea id="progObs" placeholder="Instrucciones, contexto, prioridad operativa..."></textarea>
+      </div>
+      <button class="btn btn-primary" id="btnProg" onclick="guardarProgramacion()">Crear tarea</button>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Programadas hoy</div>
+      <div id="progHoyList">Cargando...</div>
+    </div>
+  `;
+}
+
+// ============================================================
+// AUTO-DEDUCCIÓN: cuando el jefe cambia el lote o la actividad
+// ============================================================
+
+// Cache: { codigo_actividad: 'email_supervisor' } para deducción instantánea
+let mapaActividadSupervisor = null;
+
+async function cargarMapaActividadSupervisor(){
+  if(mapaActividadSupervisor !== null) return mapaActividadSupervisor;
+  const { data, error } = await sb.from('avc_usuario_actividades')
+    .select('email, codigo_actividad, user_perfiles!inner(nombre_completo, cargo, rol_avc, activo)');
+  if(error){ console.error('Error cargando supervisores:', error); mapaActividadSupervisor = {}; return mapaActividadSupervisor; }
+  
+  const m = {};
+  (data||[]).forEach(r => {
+    // Solo supervisores activos
+    if(r.user_perfiles && r.user_perfiles.rol_avc === 'supervisor_actividad' && r.user_perfiles.activo){
+      m[r.codigo_actividad] = {
+        email: r.email,
+        nombre: r.user_perfiles.nombre_completo,
+        cargo: r.user_perfiles.cargo
+      };
+    }
+  });
+  mapaActividadSupervisor = m;
+  return m;
+}
+
+// Cache de mezclas activas y sus productos
+let mezclasCache = null;
+
+async function cargarMezclas(){
+  if(mezclasCache !== null) return mezclasCache;
+  
+  // Query 1: mezclas activas
+  const { data: mezclas, error: e1 } = await sb.from('avc_mezclas')
+    .select('id, nombre, descripcion')
+    .eq('activa', true)
+    .order('nombre');
+  
+  if(e1){ console.error('Error cargando mezclas:', e1); mezclasCache = []; return mezclasCache; }
+  
+  // Query 2: relación mezcla-producto (sin join)
+  const { data: relaciones, error: e2 } = await sb.from('avc_mezcla_productos')
+    .select('mezcla_id, producto_id, dosis_default, orden')
+    .order('orden');
+  
+  if(e2){ console.error('Error cargando relaciones:', e2); mezclasCache = []; return mezclasCache; }
+  
+  // Query 3: productos
+  const { data: productos, error: e3 } = await sb.from('avc_productos')
+    .select('id, nombre, unidad_medida')
+    .eq('activo', true);
+  
+  if(e3){ console.error('Error cargando productos:', e3); mezclasCache = []; return mezclasCache; }
+  
+  // Indexar productos por id
+  const productosById = {};
+  (productos || []).forEach(p => { productosById[p.id] = p; });
+  
+  // Ensamblar
+  mezclasCache = (mezclas || []).map(m => ({
+    id: m.id,
+    nombre: m.nombre,
+    descripcion: m.descripcion,
+    productos: (relaciones || [])
+      .filter(r => r.mezcla_id === m.id)
+      .map(r => {
+        const prod = productosById[r.producto_id];
+        return {
+          producto_id: r.producto_id,
+          nombre: prod ? prod.nombre : `Producto ${r.producto_id}`,
+          unidad: prod ? prod.unidad_medida : '',
+          dosis_default: parseFloat(r.dosis_default),
+          orden: r.orden
+        };
+      })
+      .sort((a,b) => (a.orden || 0) - (b.orden || 0))
+  }));
+  
+  console.log('Mezclas cargadas:', mezclasCache.length, mezclasCache);
+  return mezclasCache;
+}
+
+function onFincaChange(){
+  const fincaSel = document.getElementById('progFinca');
+  const loteSel = document.getElementById('progLote');
+  const info = document.getElementById('loteInfo');
+  const finca = fincaSel.value;
+  
+  // Reset lote
+  loteSel.innerHTML = '<option value="">Seleccionar lote...</option>';
+  if(info) info.style.display = 'none';
+  
+  if(!finca){
+    loteSel.disabled = true;
+    loteSel.innerHTML = '<option value="">Elige una finca primero</option>';
+    actualizarBloqueAsignacion();
+    return;
+  }
+  
+  // Recuperar todos los lotes desde la variable global
+  const todosLotes = window._progLotes || [];
+  
+  // Filtrar por finca
+  const lotesFinca = todosLotes
+    .filter(l => l.finca_nombre === finca)
+    .sort((a,b) => {
+      // Orden numérico de "Lote N"
+      const an = parseInt(String(a.lote_num).replace(/\D/g,'')) || 0;
+      const bn = parseInt(String(b.lote_num).replace(/\D/g,'')) || 0;
+      return an - bn;
+    });
+  
+  if(lotesFinca.length === 0){
+    loteSel.disabled = true;
+    loteSel.innerHTML = '<option value="">Sin lotes en esta finca</option>';
+    actualizarBloqueAsignacion();
+    return;
+  }
+  
+  loteSel.disabled = false;
+  loteSel.innerHTML = '<option value="">Seleccionar lote...</option>' + lotesFinca.map(l => 
+    `<option value="${l.finca_lote}" data-encargado-nombre="${l.encargado_nombre}" data-encargado-email="${l.encargado_email || ''}" data-area="${l.area_ha || ''}">Lote ${l.lote_num}${l.area_ha ? ` (${l.area_ha} ha)`:''}</option>`
+  ).join('');
+  
+  actualizarBloqueAsignacion();
+}
+
+function onLoteChange(){
+  const sel = document.getElementById('progLote');
+  const opt = sel.options[sel.selectedIndex];
+  const info = document.getElementById('loteInfo');
+  if(!opt || !opt.value){
+    info.style.display = 'none';
+    actualizarBloqueAsignacion();
+    return;
+  }
+  const encNombre = opt.getAttribute('data-encargado-nombre');
+  info.innerHTML = `<i class="ti ti-user"></i> Encargado del lote: <strong>${encNombre}</strong>`;
+  info.style.display = 'block';
+  actualizarBloqueAsignacion();
+}
+
+async function onActividadChange(){
+  const cod = parseInt(document.getElementById('progActividad').value);
+  const lbl = document.getElementById('progMetricaLbl');
+  const helpEl = document.getElementById('progMetricaHelp');
+  const row = document.getElementById('progMetricaRow');
+  const extras = document.getElementById('progExtras');
+
+  if(!cod){ 
+    if(lbl) lbl.textContent = 'HA proyectadas';
+    if(helpEl) helpEl.style.display = 'none';
+    if(row) row.style.display = 'grid';
+    if(extras) extras.innerHTML = '';
+    const pf = document.getElementById('progPersonalField');
+    if(pf) pf.style.display = '';
+    actualizarBloqueAsignacion();
+    return; 
+  }
+
+  // Métrica dinámica según tipo_captura
+  const act = actividadesAll.find(a => a.codigo_actividad === cod);
+  if(act && lbl && helpEl && row){
+    const tipo = act.tipo_captura;
+    row.style.display = 'grid';
+    helpEl.style.display = 'none';
+    if(tipo === 'MTS'){
+      lbl.textContent = 'Metros proyectados';
+      helpEl.textContent = 'Esta actividad se mide en metros (drenajes/cercos).';
+      helpEl.style.display = 'block';
+    } else if(tipo === 'NINGUNA'){
+      lbl.textContent = 'Estimado de avance (referencial)';
+      helpEl.textContent = 'Esta actividad no requiere métrica de avance. Puedes dejar 0.';
+      helpEl.style.display = 'block';
+    } else {
+      lbl.textContent = 'HA proyectadas';
+    }
+  }
+
+  // Ocultar/mostrar campo Personal según requiere_personal
+  const persoField = document.getElementById('progPersonalField');
+  const persoInput = document.getElementById('progPersonal');
+  if(persoField && act){
+    if(act.requiere_personal === false){
+      persoField.style.display = 'none';
+      if(persoInput) persoInput.value = '0';
+    } else {
+      persoField.style.display = '';
+    }
+  }
+
+  // Campos extras según tipo_captura
+  if(act && extras){
+    let html = armarCamposExtrasJefe(act);
+    
+    // Si es EXTERNA, también agrega el bloque PM (mezcla + jornada)
+    if(act.modelo_comparticion === 'EXTERNA'){
+      const mezclas = await cargarMezclas();
+      html += armarBloqueJefeEXTERNA(mezclas);
+    }
+    
+    extras.innerHTML = html;
+  }
+
+  // Cargar mapa de supervisores si aún no está
+  await cargarMapaActividadSupervisor();
+
+  actualizarBloqueAsignacion();
+}
+
+function armarBloqueJefeEXTERNA(mezclas){
+  // Bloque adicional para programar actividades químicas (modelo EXTERNA)
+  return `
+    <div style="background:#FAF5E8;border:1px solid #E0CFA8;border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:10px">
+        <i class="ti ti-flask"></i> Datos de Planta Mezcla (planificación)
+      </div>
+      
+      <div class="field">
+        <label>Mezcla a aplicar *</label>
+        <select id="progMezcla" onchange="onMezclaChange()">
+          <option value="">Seleccionar mezcla...</option>
+          ${mezclas.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}
+        </select>
+        ${mezclas.length === 0 ? '<div class="field-help" style="color:#A32D2D">⚠ No hay mezclas creadas. PM debe crearlas en Matriz primero.</div>' : ''}
+      </div>
+      
+      <div id="progMezclaDetalle" style="display:none">
+        <div class="field-help" style="color:#854F0B;margin-bottom:8px"><strong>Productos de la mezcla</strong> (podés ajustar dosis si es necesario)</div>
+        <div id="progProductosLista"></div>
+      </div>
+      
+      <div class="field" style="margin-top:12px">
+        <label>Jornada *</label>
+        <select id="progJornada">
+          <option value="">Seleccionar...</option>
+          <option value="Diurna">Diurna</option>
+          <option value="Nocturna">Nocturna</option>
+        </select>
+      </div>
+      
+      <div class="field">
+        <label>Observación técnica PM (opcional)</label>
+        <textarea id="progObsPM" placeholder="Instrucciones específicas para PM (clima requerido, restricciones, etc.)" style="height:60px"></textarea>
+      </div>
+    </div>
+  `;
+}
+
+function onMezclaChange(){
+  const sel = document.getElementById('progMezcla');
+  const detalle = document.getElementById('progMezclaDetalle');
+  const lista = document.getElementById('progProductosLista');
+  const id = parseInt(sel.value);
+  
+  if(!id || !mezclasCache){
+    detalle.style.display = 'none';
+    lista.innerHTML = '';
+    return;
+  }
+  
+  const mezcla = mezclasCache.find(m => m.id === id);
+  if(!mezcla){ detalle.style.display = 'none'; return; }
+  
+  lista.innerHTML = mezcla.productos.map((p, idx) => `
+    <div style="background:white;border:1px solid #E5E7EB;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500;color:#111827">${p.nombre}</div>
+          <div style="font-size:11px;color:#6b7280">Dosis sugerida: ${p.dosis_default} ${p.unidad}/ha</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" step="0.01" 
+                 id="progDosis_${p.producto_id}" 
+                 data-producto-id="${p.producto_id}"
+                 value="${p.dosis_default}" 
+                 style="width:80px;text-align:right" 
+                 class="prog-dosis-input"/>
+          <span style="font-size:12px;color:#6b7280;min-width:36px">${p.unidad}/ha</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  
+  detalle.style.display = 'block';
+}
+
+function armarCamposExtrasJefe(act){
+  // Devuelve el HTML de los campos extras a planificar según tipo_captura
+  const tipo = act.tipo_captura;
+  
+  // Obtener variedad del lote para precargar como sugerencia
+  const loteSel = document.getElementById('progLote');
+  const loteVal = loteSel ? loteSel.value : '';
+  const loteRow = loteVal ? plantios.find(p => p.finca_lote === loteVal) : null;
+  const variedadDefault = (loteRow && loteRow.variedad) ? loteRow.variedad.replace(/"/g,'&quot;') : 'LAICA 00-301';
+  
+  if(tipo === 'HA_QQ'){
+    return `<div class="field">
+      <label>Quintales a aplicar (qq)</label>
+      <input type="number" step="0.01" id="progQq" placeholder="0.00"/>
+      <div class="field-help">Quintales de fertilizante planificados para aplicar.</div>
+    </div>`;
+  }
+  
+  if(tipo === 'HA_VARIEDAD'){
+    return `<div class="field">
+      <label>Variedad planificada</label>
+      <input type="text" id="progVariedad" value="${variedadDefault}" placeholder="Ej: LAICA 00-301"/>
+      <div class="field-help">Variedad que el ejecutor verá como referencia.</div>
+    </div>`;
+  }
+  
+  if(tipo === 'HA_SIEMBRA'){
+    return `<div class="field">
+      <label>Variedad planificada</label>
+      <input type="text" id="progVariedad" value="${variedadDefault}" placeholder="Ej: LAICA 00-301"/>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Distancia siembra (m)</label>
+        <input type="number" step="0.01" id="progDistancia" value="1.5"/>
+      </div>
+      <div class="field">
+        <label>Ancho surco (m)</label>
+        <input type="number" step="0.01" id="progAncho" value="2"/>
+      </div>
+    </div>
+    <div class="field-help" style="margin-top:-8px;margin-bottom:14px">Valores típicos: distancia 1.5 m, ancho surco 2 m.</div>`;
+  }
+  
+  return '';
+}
+
+function actualizarBloqueAsignacion(){
+  const box = document.getElementById('progAsignacion');
+  const loteSel = document.getElementById('progLote');
+  const actSel = document.getElementById('progActividad');
+  const btnProg = document.getElementById('btnProg');
+  if(!box) return;
+
+  const cod = parseInt(actSel.value);
+  const loteOpt = loteSel.options[loteSel.selectedIndex];
+  const hayLote = loteOpt && loteOpt.value;
+  const hayAct = !!cod;
+
+  // Si falta algo, ocultar el bloque
+  if(!hayLote || !hayAct){
+    box.style.display = 'none';
+    if(btnProg) btnProg.disabled = false;
+    return;
+  }
+
+  // Datos del lote
+  const encNombre = loteOpt.getAttribute('data-encargado-nombre');
+  const encEmail = loteOpt.getAttribute('data-encargado-email');
+
+  // Datos de la actividad
+  const act = actividadesAll.find(a => a.codigo_actividad === cod);
+  if(!act){ box.style.display = 'none'; return; }
+  const modelo = act.modelo_comparticion;
+  const supInfo = mapaActividadSupervisor ? mapaActividadSupervisor[cod] : null;
+
+  let html = '';
+  let bloquear = false;
+  let bgColor = '#FBFAFE'; // lila default
+  let borderColor = '#A78BFA';
+
+  if(modelo === 'ENCARGADO'){
+    // Solo encargado del lote
+    bgColor = '#E1F5EE'; borderColor = '#1D9E75';
+    html = `
+      <div class="banner-lbl" style="color:#0F6E56">📌 Asignación automática</div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <i class="ti ti-user-check" style="font-size:18px;color:#1D9E75"></i>
+        <div><strong>${encNombre}</strong> <span style="color:#6b7280">(encargado del lote)</span></div>
+      </div>
+      <div style="font-size:12px;color:#0F6E56;margin-top:6px">Tarea exclusiva del encargado</div>
+    `;
+  } else if(modelo === 'SUPERVISOR'){
+    if(!supInfo){
+      bloquear = true;
+      bgColor = '#FCE9E9'; borderColor = '#A32D2D';
+      html = `
+        <div class="banner-lbl" style="color:#A32D2D">⚠ No se puede programar</div>
+        <div style="margin-top:8px;font-size:13px;color:#A32D2D">
+          No hay supervisor configurado para esta actividad (${act.codigo_actividad}). Contactá al administrador para asignar uno antes de programar.
+        </div>
+      `;
+    } else {
+      bgColor = '#E6F1FB'; borderColor = '#378ADD';
+      html = `
+        <div class="banner-lbl" style="color:#0F4F8C">📌 Asignación automática</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-tool" style="font-size:18px;color:#378ADD"></i>
+          <div><strong>${supInfo.nombre}</strong> <span style="color:#6b7280">(${supInfo.cargo})</span></div>
+        </div>
+        <div style="font-size:12px;color:#0F4F8C;margin-top:6px">Tarea exclusiva del supervisor</div>
+      `;
+    }
+  } else if(modelo === 'COMPARTIDA'){
+    if(!supInfo){
+      bloquear = true;
+      bgColor = '#FCE9E9'; borderColor = '#A32D2D';
+      html = `
+        <div class="banner-lbl" style="color:#A32D2D">⚠ No se puede programar</div>
+        <div style="margin-top:8px;font-size:13px;color:#A32D2D">
+          Esta actividad es compartida pero no tiene supervisor configurado (${act.codigo_actividad}). Contactá al administrador.
+        </div>
+      `;
+    } else {
+      bgColor = '#FBFAFE'; borderColor = '#A78BFA';
+      html = `
+        <div class="banner-lbl" style="color:#5B21B6">⬡ Operación compartida</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-tool" style="font-size:18px;color:#7C3AED"></i>
+          <div><strong>${supInfo.nombre}</strong> <span style="color:#6b7280">(${supInfo.cargo})</span></div>
+        </div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-user" style="font-size:18px;color:#7C3AED"></i>
+          <div><strong>${encNombre}</strong> <span style="color:#6b7280">(encargado del lote)</span></div>
+        </div>
+        <div style="font-size:12px;color:#5B21B6;margin-top:6px">El supervisor abre, el encargado aporta personal</div>
+      `;
+    }
+  } else if(modelo === 'EXTERNA'){
+    if(!supInfo){
+      bloquear = true;
+      bgColor = '#FCE9E9'; borderColor = '#A32D2D';
+      html = `
+        <div class="banner-lbl" style="color:#A32D2D">⚠ No se puede programar</div>
+        <div style="margin-top:8px;font-size:13px;color:#A32D2D">
+          Esta es una actividad química (PM) pero no hay supervisor PM configurado. Contactá al administrador.
+        </div>
+      `;
+    } else {
+      bgColor = '#F7ECD6'; borderColor = '#BA7517';
+      html = `
+        <div class="banner-lbl" style="color:#A06410">🧪 Actividad química (PM)</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-flask" style="font-size:18px;color:#BA7517"></i>
+          <div><strong>${supInfo.nombre}</strong> <span style="color:#6b7280">(${supInfo.cargo})</span></div>
+        </div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-user" style="font-size:18px;color:#BA7517"></i>
+          <div><strong>${encNombre}</strong> <span style="color:#6b7280">(apoyo del lote)</span></div>
+        </div>
+        <div style="font-size:12px;color:#A06410;margin-top:6px">Planta Mezcla la ejecuta, el encargado aporta personal de apoyo</div>
+      `;
+    }
+  } else {
+    // modelo null o desconocido → bloquear
+    bloquear = true;
+    bgColor = '#FCE9E9'; borderColor = '#A32D2D';
+    html = `
+      <div class="banner-lbl" style="color:#A32D2D">⚠ Actividad sin clasificar</div>
+      <div style="margin-top:8px;font-size:13px;color:#A32D2D">
+        La actividad ${cod} no tiene modelo de comparticion definido. No se puede programar hasta clasificarla.
+      </div>
+    `;
+  }
+
+  box.innerHTML = `
+    <div style="background:${bgColor};border:1px solid ${borderColor};border-left:3px solid ${borderColor};border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      ${html}
+    </div>
+  `;
+  box.style.display = 'block';
+
+  // Guardar info en data attrs del bloque para que guardarProgramacion la lea
+  box.setAttribute('data-modelo', modelo || '');
+  box.setAttribute('data-email-encargado', encEmail || '');
+  box.setAttribute('data-email-supervisor', (supInfo && supInfo.email) || '');
+  box.setAttribute('data-bloqueado', bloquear ? '1' : '0');
+
+  if(btnProg) btnProg.disabled = bloquear;
+
+  // Después de actualizar la asignación, también verificar área
+  validarAreaPlan();
+}
+
+// ============================================================
+// VALIDACIÓN DE ÁREA DEL LOTE (en vivo)
+// ============================================================
+async function validarAreaPlan(){
+  const loteSel = document.getElementById('progLote');
+  const actSel = document.getElementById('progActividad');
+  const haInput = document.getElementById('progHa');
+  const info = document.getElementById('progAreaInfo');
+  const btnProg = document.getElementById('btnProg');
+  const box = document.getElementById('progAsignacion');
+  if(!loteSel || !actSel || !info) return;
+
+  const loteOpt = loteSel.options[loteSel.selectedIndex];
+  const cod = parseInt(actSel.value);
+  const ha = parseFloat(haInput?.value || 0);
+
+  if(!loteOpt || !loteOpt.value || !cod){
+    info.style.display = 'none';
+    return;
+  }
+
+  const finca_lote = loteOpt.value;
+  const area = parseFloat(loteOpt.getAttribute('data-area') || 0);
+  const act = actividadesAll.find(a => a.codigo_actividad === cod);
+  const tipo = act?.tipo_captura;
+
+  // Para MTS y NINGUNA no aplica validación de área
+  if(tipo === 'MTS' || tipo === 'NINGUNA'){
+    info.style.display = 'none';
+    // Quitar bloqueo por área si lo había
+    haInput.setAttribute('data-area-ok', '1');
+    if(btnProg && box && box.getAttribute('data-bloqueado') !== '1') btnProg.disabled = false;
+    return;
+  }
+
+  if(!area || area <= 0){
+    info.style.display = 'none';
+    return;
+  }
+
+  // Consultar acumulado planificado para misma actividad y lote
+  // Solo cuenta no-eliminadas (que estén en cualquier estado, porque todas consumen área)
+  const { data } = await sb.from('avc_programacion')
+    .select('id, ha_plan, estado, fecha')
+    .eq('finca_lote', finca_lote)
+    .eq('codigo_actividad', cod)
+    .eq('eliminada', false);
+
+  const acumPlan = (data || []).reduce((s, p) => s + parseFloat(p.ha_plan || 0), 0);
+  const disponible = area - acumPlan;
+  const excede = ha > disponible;
+  const cuantasPrevias = (data || []).length;
+
+  let bg = '#E1F5EE', color = '#0F6E56', icon = 'ti-circle-check';
+  let msg = '';
+
+  if(cuantasPrevias === 0){
+    bg = '#EFF6FF'; color = '#1E40AF'; icon = 'ti-info-circle';
+    msg = `<i class="ti ${icon}"></i> Lote ${area} ha · sin tareas previas para esta actividad · disponible <strong>${area.toFixed(2)} ha</strong>`;
+  } else if(ha <= 0){
+    bg = '#FAF5EE'; color = '#854F0B'; icon = 'ti-info-circle';
+    msg = `<i class="ti ${icon}"></i> Lote ${area} ha · ${cuantasPrevias} tarea${cuantasPrevias!==1?'s':''} previa${cuantasPrevias!==1?'s':''} (${acumPlan.toFixed(2)} ha) · disponible <strong>${disponible.toFixed(2)} ha</strong>`;
+  } else if(excede){
+    bg = '#FCE9E9'; color = '#A32D2D'; icon = 'ti-alert-triangle';
+    msg = `<i class="ti ${icon}"></i> <strong>Excede el área disponible</strong>. Lote ${area} ha · ya planificado ${acumPlan.toFixed(2)} ha · estás intentando ${ha.toFixed(2)} ha · máximo permitido <strong>${disponible.toFixed(2)} ha</strong>`;
+  } else {
+    bg = '#E1F5EE'; color = '#0F6E56'; icon = 'ti-circle-check';
+    msg = `<i class="ti ${icon}"></i> Lote ${area} ha · planificado ${acumPlan.toFixed(2)} ha · esta tarea ${ha.toFixed(2)} ha · restará <strong>${(disponible - ha).toFixed(2)} ha</strong>`;
+  }
+
+  info.style.background = bg;
+  info.style.color = color;
+  info.style.border = '1px solid ' + color + '40';
+  info.innerHTML = msg;
+  info.style.display = 'block';
+
+  // Marcar estado de validación de área
+  haInput.setAttribute('data-area-ok', excede ? '0' : '1');
+
+  // Bloquear el botón si excede (sólo si no hay otro bloqueo activo)
+  if(btnProg){
+    const bloqueadoAsignacion = box && box.getAttribute('data-bloqueado') === '1';
+    btnProg.disabled = bloqueadoAsignacion || excede;
+  }
+}
+
+async function guardarProgramacion(){
+  const btn = document.getElementById('btnProg');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const fecha = document.getElementById('progFecha').value;
+    const finca_lote = document.getElementById('progLote').value;
+    const codigo_actividad = parseInt(document.getElementById('progActividad').value);
+    const ha_plan = parseFloat(document.getElementById('progHa').value || 0);
+    const personal_plan = parseInt(document.getElementById('progPersonal').value || 0);
+    const prioridad = document.getElementById('progPrioridad').value;
+    const hora = document.getElementById('progHora').value || null;
+    const obs = document.getElementById('progObs').value.trim() || null;
+
+    if(!fecha || !finca_lote || !codigo_actividad)
+      throw new Error('Completa fecha, lote y actividad');
+
+    // Leer el bloque de auto-deducción
+    const box = document.getElementById('progAsignacion');
+    if(!box || box.getAttribute('data-bloqueado') === '1')
+      throw new Error('No se puede programar: actividad sin configurar correctamente');
+
+    const modelo = box.getAttribute('data-modelo');
+    let email_encargado = box.getAttribute('data-email-encargado') || null;
+    let email_supervisor = box.getAttribute('data-email-supervisor') || null;
+
+    // Ajustar según modelo
+    if(modelo === 'SUPERVISOR'){
+      // En SUPERVISOR solo el supervisor ejecuta; el encargado no recibe la tarea
+      email_encargado = null;
+    } else if(modelo === 'ENCARGADO'){
+      // En ENCARGADO no hay supervisor
+      email_supervisor = null;
+    }
+    // En COMPARTIDA y EXTERNA: ambos email_encargado y email_supervisor se mantienen
+
+    // Validación dinámica según tipo de actividad
+    const act = actividadesAll.find(a => a.codigo_actividad === codigo_actividad);
+    const tipo = act?.tipo_captura;
+    
+    if(tipo === 'MTS'){
+      if(ha_plan <= 0) throw new Error('Indica los metros proyectados');
+    } else if(tipo === 'NINGUNA'){
+      // No requiere métrica de avance
+    } else {
+      if(ha_plan <= 0) throw new Error('Indica HA proyectadas');
+      
+      // Validación final de área (server-side check para evitar carreras)
+      const loteOpt = document.getElementById('progLote').options[document.getElementById('progLote').selectedIndex];
+      const area = parseFloat(loteOpt.getAttribute('data-area') || 0);
+      if(area > 0){
+        const { data: previas } = await sb.from('avc_programacion')
+          .select('ha_plan')
+          .eq('finca_lote', finca_lote)
+          .eq('codigo_actividad', codigo_actividad)
+          .eq('eliminada', false);
+        const acumPlan = (previas || []).reduce((s, p) => s + parseFloat(p.ha_plan || 0), 0);
+        const disponible = area - acumPlan;
+        if(ha_plan > disponible){
+          throw new Error(`Excede el área disponible. Lote tiene ${area} ha · planificado ${acumPlan.toFixed(2)} ha · máximo permitido para esta tarea: ${disponible.toFixed(2)} ha`);
+        }
+      }
+    }
+    // Personal: solo validar si la actividad lo requiere
+    if(act?.requiere_personal !== false){
+      if(personal_plan <= 0) throw new Error('Indica personal proyectado');
+    }
+
+    // Validar que tengamos al menos un destinatario
+    if(!email_encargado && !email_supervisor)
+      throw new Error('No se puede determinar a quién asignar la tarea');
+
+    // Leer y validar campos extras según tipo_captura
+    let qq_plan = null, variedad_plan = null, distancia_siembra_plan = null, ancho_surco_plan = null;
+    
+    if(tipo === 'HA_QQ'){
+      const qqEl = document.getElementById('progQq');
+      qq_plan = parseFloat(qqEl?.value || 0);
+      if(!qq_plan || qq_plan <= 0) throw new Error('Indica los quintales a aplicar');
+    } else if(tipo === 'HA_VARIEDAD'){
+      const vEl = document.getElementById('progVariedad');
+      variedad_plan = (vEl?.value || '').trim();
+      if(!variedad_plan) throw new Error('Indica la variedad planificada');
+    } else if(tipo === 'HA_SIEMBRA'){
+      const vEl = document.getElementById('progVariedad');
+      const dEl = document.getElementById('progDistancia');
+      const aEl = document.getElementById('progAncho');
+      variedad_plan = (vEl?.value || '').trim();
+      distancia_siembra_plan = parseFloat(dEl?.value || 0);
+      ancho_surco_plan = parseFloat(aEl?.value || 0);
+      if(!variedad_plan) throw new Error('Indica la variedad planificada');
+      if(!distancia_siembra_plan || distancia_siembra_plan <= 0) throw new Error('Indica la distancia de siembra');
+      if(!ancho_surco_plan || ancho_surco_plan <= 0) throw new Error('Indica el ancho de surco');
+    }
+
+    // Campos PM si la actividad es EXTERNA (aplicaciones químicas)
+    let mezcla_id = null, dosis_ajustes = null, jornada = null, observacion_pm = null;
+    
+    if(modelo === 'EXTERNA'){
+      const mezclaSel = document.getElementById('progMezcla');
+      const jornadaSel = document.getElementById('progJornada');
+      const obsPmEl = document.getElementById('progObsPM');
+      
+      mezcla_id = parseInt(mezclaSel?.value || 0);
+      jornada = jornadaSel?.value || '';
+      observacion_pm = (obsPmEl?.value || '').trim() || null;
+      
+      if(!mezcla_id) throw new Error('Selecciona una mezcla para aplicar');
+      if(!jornada) throw new Error('Indica la jornada (diurna o nocturna)');
+      
+      // Capturar dosis ajustadas
+      const dosisInputs = document.querySelectorAll('.prog-dosis-input');
+      const ajustes = {};
+      let alMenosUnaDosis = false;
+      dosisInputs.forEach(inp => {
+        const pid = parseInt(inp.getAttribute('data-producto-id'));
+        const dosis = parseFloat(inp.value || 0);
+        if(dosis > 0){
+          ajustes[pid] = dosis;
+          alMenosUnaDosis = true;
+        }
+      });
+      
+      if(!alMenosUnaDosis) throw new Error('Al menos un producto debe tener dosis mayor a cero');
+      dosis_ajustes = ajustes;
+    }
+
+    // Si es EXTERNA → cae primero a PM como solicitud, no directo al supervisor.
+    // PM revisará, ajustará si hace falta y "enviará" a los supervisores.
+    const estadoInicial = (modelo === 'EXTERNA') ? 'solicitud_pm' : 'planificado';
+
+    const { data: inserted, error } = await sb.from('avc_programacion').insert({
+      fecha,
+      finca_lote,
+      codigo_actividad,
+      ha_plan,
+      personal_plan,
+      qq_plan,
+      variedad_plan,
+      distancia_siembra_plan,
+      ancho_surco_plan,
+      mezcla_id,
+      dosis_ajustes,
+      jornada,
+      observacion_pm,
+      observacion_plan: obs,
+      estado: estadoInicial,
+      creado_por: usuario.email,
+      email_encargado,
+      email_supervisor,
+      hora_programada: hora,
+      prioridad
+    }).select().single();
+
+    if(error) throw new Error(error.message);
+
+    // Disparar notificación al asignatario (no aplica a EXTERNA: esa la notifica PM al aprobar)
+    if(inserted){
+      await notificarTareaAsignada(inserted, modelo);
+    }
+
+    const msgOk = (modelo === 'EXTERNA') 
+      ? 'Solicitud enviada a Planta Mezcla' 
+      : 'Tarea programada correctamente';
+    toast(msgOk);
+    renderJefe(); // refresh
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Crear tarea';
+  }
+}
+
+// Variables para el filtro del historial del jefe
+let histJefeFiltro = 'todas'; // todas | planificadas | activas | completadas | eliminadas
+
+async function renderJefeHistorial(){
+  const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
+  if(!distritoNombre) return '<div class="empty">No se encontró tu distrito.</div>';
+  const distrito = jerarquia[distritoNombre];
+  const emailsEnc = distrito.encargados.map(e => e.email).filter(Boolean);
+
+  // También incluir lotes donde el supervisor recibe (a través de finca_lote del distrito)
+  // Por simplicidad: filtramos por encargado_email O por finca del distrito
+  const fincasDistrito = new Set();
+  distrito.encargados.forEach(e => e.fincas.forEach(f => fincasDistrito.add(f.codigo)));
+  
+  // Query: todas las tareas del distrito (encargado del distrito O lote en finca del distrito)
+  let query = sb.from('avc_programacion').select('*');
+  
+  if(histJefeFiltro === 'eliminadas'){
+    query = query.eq('eliminada', true);
+  } else {
+    query = query.eq('eliminada', false);
+  }
+
+  if(histJefeFiltro === 'planificadas'){
+    query = query.in('estado', ['planificado','pendiente','esperando_supervisor']);
+  } else if(histJefeFiltro === 'activas'){
+    query = query.in('estado', ['en_curso','esperando_encargado','esperando_supervisor']);
+  } else if(histJefeFiltro === 'completadas'){
+    query = query.eq('estado', 'completada');
+  }
+  
+  // Filtro por distrito: encargado_email del distrito O finca empieza con código del distrito
+  if(emailsEnc.length > 0){
+    query = query.in('email_encargado', emailsEnc);
+  }
+  
+  const { data: progs } = await query
+    .order('fecha', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(100);
+
+  // Conteo por filtro para los chips
+  const cuentas = await contarHistorialPorFiltro(emailsEnc);
+
+  const chips = [
+    {id:'todas', label:'Todas', count: cuentas.todas},
+    {id:'planificadas', label:'No ejecutadas', count: cuentas.planificadas},
+    {id:'activas', label:'En curso', count: cuentas.activas},
+    {id:'completadas', label:'Completadas', count: cuentas.completadas},
+    {id:'eliminadas', label:'Eliminadas', count: cuentas.eliminadas}
+  ];
+
+  let chipsHtml = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${chips.map(c => `<button class="chip ${histJefeFiltro===c.id?'chip-sel':''}" onclick="cambiarFiltroHistorial('${c.id}')">${c.label}${c.count>0?` <span class="chip-count">${c.count}</span>`:''}</button>`).join('')}
+  </div>`;
+
+  if(!progs || progs.length === 0){
+    return chipsHtml + '<div class="empty"><i class="ti ti-calendar-plus"></i>No hay tareas en este filtro.</div>';
+  }
+
+  const itemsHtml = progs.map(p => {
+    const enc = distrito.encargados.find(e => e.email === p.email_encargado);
+    const noEjecutada = (p.estado === 'planificado' || p.estado === 'pendiente' || p.estado === 'esperando_supervisor');
+    const haAtrasada = p.fecha < hoyISO() && noEjecutada;
+    const puedeEliminar = !p.eliminada && noEjecutada;
+    
+    let extra = '';
+    if(p.eliminada){
+      extra = `<div style="background:#f3f4f6;border-left:3px solid #9ca3af;padding:6px 10px;margin-top:6px;border-radius:4px;font-size:11px;color:#6b7280">
+        <strong>Eliminada</strong> ${p.razon_eliminada ? '· ' + p.razon_eliminada : ''}
+        <div style="margin-top:2px">${p.eliminada_por || ''} · ${p.eliminada_en ? new Date(p.eliminada_en).toLocaleString('es-HN') : ''}</div>
+      </div>`;
+    } else if(haAtrasada){
+      extra = `<div style="font-size:11px;color:#A32D2D;margin-top:4px"><i class="ti ti-alert-triangle"></i> Atrasada (programada para ${p.fecha})</div>`;
+    }
+    
+    return `<div class="reg-item" ${p.eliminada?'style="opacity:0.6"':''}>
+      <div class="reg-head">
+        ${p.eliminada ? '<span class="badge" style="background:#e5e7eb;color:#4b5563">Eliminada</span>' : badge(p.estado)}
+        <span class="reg-fecha">${p.fecha}</span>
+      </div>
+      <div class="reg-finca">${actNombre(p.codigo_actividad)} · ${p.finca_lote}</div>
+      <div class="reg-meta">${enc ? enc.nombre : (p.email_encargado || p.email_supervisor || '—')} · plan ${p.ha_plan} ha${p.ha_real?` · real ${p.ha_real} ha`:''}</div>
+      ${extra}
+      ${puedeEliminar ? `<button class="btn-eliminar" onclick="abrirModalEliminar(${p.id}, '${(actNombre(p.codigo_actividad)||'').replace(/'/g,"\\'")}', '${p.finca_lote}')"><i class="ti ti-trash"></i> Eliminar</button>` : ''}
+    </div>`;
+  }).join('');
+
+  return chipsHtml + itemsHtml;
+}
+
+async function contarHistorialPorFiltro(emailsEnc){
+  if(emailsEnc.length === 0) return {todas:0,planificadas:0,activas:0,completadas:0,eliminadas:0};
+  
+  const { data: todasAll } = await sb.from('avc_programacion')
+    .select('id, estado, eliminada')
+    .in('email_encargado', emailsEnc);
+  
+  const todas = (todasAll||[]).filter(p => !p.eliminada);
+  return {
+    todas: todas.length,
+    planificadas: todas.filter(p => ['planificado','pendiente','esperando_supervisor'].includes(p.estado)).length,
+    activas: todas.filter(p => ['en_curso','esperando_encargado','esperando_supervisor'].includes(p.estado)).length,
+    completadas: todas.filter(p => p.estado === 'completada').length,
+    eliminadas: (todasAll||[]).filter(p => p.eliminada).length
+  };
+}
+
+function cambiarFiltroHistorial(filtro){
+  histJefeFiltro = filtro;
+  routerPorRol();
+}
+
+// ============================================================
+// MODAL ELIMINAR TAREA (soft delete con justificación)
+// ============================================================
+function abrirModalEliminar(progId, actNom, fincaLote){
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Eliminar tarea</h2>
+    <div style="font-size:13px;color:#374151;margin-bottom:14px">
+      ${actNom}<br><span style="color:#6b7280;font-size:12px">${fincaLote}</span>
+    </div>
+    <div class="banner red">
+      <div class="banner-lbl" style="color:#A32D2D">⚠ Atención</div>
+      <div class="banner-txt">Esta tarea se marcará como eliminada. La razón quedará registrada y visible en el historial.</div>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <label>Razón de eliminación (obligatoria)</label>
+      <textarea id="razonEliminar" placeholder="Ej: lluvia impidió la actividad · falta de personal · cambio de plan..." style="height:80px"></textarea>
+    </div>
+    <button class="btn btn-primary" style="background:#A32D2D" onclick="confirmarEliminar(${progId})">Confirmar eliminación</button>
+  `;
+  showModal();
+}
+
+async function confirmarEliminar(progId){
+  const razon = (document.getElementById('razonEliminar').value || '').trim();
+  if(razon.length < 5){
+    toast('La razón debe tener al menos 5 caracteres','error');
+    return;
+  }
+  
+  const { error } = await sb.from('avc_programacion').update({
+    eliminada: true,
+    eliminada_en: new Date().toISOString(),
+    eliminada_por: usuario.email,
+    razon_eliminada: razon
+  }).eq('id', progId);
+  
+  if(error){
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+  
+  closeModal();
+  toast('Tarea eliminada');
+  routerPorRol();
+}
+
+/* ============================================================
+   VISTA: ENCARGADO DE FINCA
+============================================================ */
+async function renderEncargado(){
+  // Defaults y fallback si quedó un tab viejo (capturar) que ya no existe
+  if(!currentTab || currentTab === 'capturar') currentTab = 'tareas';
+  const tabs = [
+    {id:'tareas', label:'Mis tareas'},
+    {id:'historial', label:'Historial'}
+  ];
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'tareas')         body = await renderEncargadoTareas();
+  else if(currentTab === 'historial') body = await renderEncargadoHistorial();
+  else                                body = await renderEncargadoTareas();
+
+  document.getElementById('appBody').innerHTML = renderTabs(tabs) + `<div class="sec active">${body}</div>`;
+}
+
+async function renderEncargadoTareas(){
+  const hoy = hoyISO();
+  const { data: tareas } = await sb.from('avc_programacion')
+    .select('*')
+    .eq('email_encargado', usuario.email)
+    .eq('fecha', hoy)
+    .eq('eliminada', false)
+    .order('hora_programada', { nullsFirst: false });
+
+  const total = (tareas || []).length;
+  const completadas = (tareas || []).filter(t => t.estado === 'completada' || t.estado === 'modificada').length;
+  const haPlan = (tareas || []).reduce((s,t) => s + parseFloat(t.ha_plan || 0), 0);
+  const haReal = (tareas || []).reduce((s,t) => s + parseFloat(t.ha_real || 0), 0);
+
+  let html = `
+    <div class="banner">
+      <div class="banner-lbl">Programación recibida</div>
+      <div class="banner-txt">${total} tarea${total!==1?'s':''} hoy · ${haPlan.toFixed(1)} ha proyectadas</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${completadas}</div></div>
+      <div class="stat"><div class="stat-lbl">HA real</div><div class="stat-val">${haReal.toFixed(1)}</div></div>
+    </div>
+  `;
+
+  if(total === 0){
+    html += '<div class="empty"><i class="ti ti-calendar-off"></i>No tienes tareas asignadas para hoy.</div>';
+  } else {
+    html += '<div class="sec-h">Hoy</div>';
+    tareas.forEach(t => {
+      const compartida = esCompartida(t.codigo_actividad);
+      const ico = iconoActividad(t.codigo_actividad);
+      const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
+                   t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
+      let metaTxt = '';
+      if(t.estado === 'planificado' || t.estado === 'pendiente'){
+        metaTxt = `Plan: ${t.ha_plan} ha · ${t.personal_plan} personas`;
+      } else if(t.estado === 'esperando_supervisor'){
+        metaTxt = `Esperando que el supervisor abra la operación`;
+      } else if(t.estado === 'esperando_encargado'){
+        metaTxt = `Supervisor registró <strong>${t.ha_real || 0} ha</strong> · falta tu parte`;
+      } else if(t.estado === 'completada' || t.estado === 'modificada'){
+        metaTxt = `${t.ha_real || 0} ha completadas`;
+      } else {
+        metaTxt = `${t.ha_real || 0}/${t.ha_plan} ha`;
+      }
+
+      html += `<div class="tarea-card estado-${t.estado}" onclick="abrirTarea(${t.id})">
+        <div class="tarea-head">
+          <div class="tarea-left">
+            <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+            <div class="tarea-info">
+              ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
+              <div class="tarea-title">${actNombre(t.codigo_actividad)}</div>
+            </div>
+          </div>
+          <div class="tarea-tags">
+            ${badge(t.estado)}
+            ${prio}
+          </div>
+        </div>
+        <div class="tarea-sub">${t.finca_lote}${compartida ? ' · con supervisor' : ''}</div>
+        <div class="tarea-meta">${metaTxt}</div>
+      </div>`;
+    });
+  }
+  return html;
+}
+
+async function abrirTarea(id){
+  currentDetailId = id;
+  console.log('abrirTarea llamada con id:', id, 'tipo:', typeof id);
+  
+  const { data: t, error } = await sb.from('avc_programacion').select('*').eq('id', id).maybeSingle();
+  if(error){ 
+    console.error('Error trayendo tarea:', error);
+    toast('Error: ' + error.message, 'error'); 
+    return; 
+  }
+  if(!t){ 
+    console.warn('Tarea no encontrada para id:', id);
+    toast('Tarea no encontrada','error'); 
+    return; 
+  }
+  console.log('Tarea cargada:', t);
+
+  // Traer registros existentes vinculados a esta programación
+  const { data: regs } = await sb.from('avc_registros')
+    .select('*')
+    .eq('programacion_id', id);
+
+  modalContent = renderTareaDetalle(t, regs || []);
+  showModal();
+}
+
+function renderTareaDetalle(t, regs){
+  const compartida = esCompartida(t.codigo_actividad);
+  const parteSup = regs.find(r => r.parte_de === 'supervisor');
+  const parteEnc = regs.find(r => r.parte_de === 'encargado');
+  const parteUnica = regs.find(r => r.parte_de === 'unico');
+
+  let acciones = '';
+  if(usuario.rol_avc === 'encargado_finca'){
+    if(compartida && parteSup && !parteEnc){
+      // Operación compartida, supervisor abrió, falta mi parte
+      acciones = `<button class="btn btn-purple" onclick="capturarParteEncargado(${t.id})">Aportar mi parte</button>`;
+    } else if(compartida && !parteSup){
+      acciones = `<div class="banner amber" style="margin-top:8px"><div class="banner-txt">⏳ Esperando que el supervisor abra la operación</div></div>`;
+    } else if(!compartida && !parteUnica && (t.estado === 'planificado' || t.estado === 'pendiente' || t.estado === 'en_curso')){
+      // No compartida, no hay registro aún → puedo registrar
+      acciones = `<button class="btn btn-primary" onclick="capturarTareaUnica(${t.id})">Registrar avance</button>`;
+    }
+  } else if(usuario.rol_avc === 'supervisor_actividad' && compartida && !parteSup){
+    acciones = `<button class="btn btn-primary" onclick="capturarParteSupervisor(${t.id})">Abrir operación</button>`;
+  }
+
+  return `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>${actNombre(t.codigo_actividad)}</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">${t.finca_lote} · ${t.fecha}${t.hora_programada?' · '+t.hora_programada:''}</div>
+
+    <div class="detail-section">
+      <div class="detail-lbl">Plan</div>
+      <div class="detail-row"><span class="key">HA proyectadas</span><span class="val">${t.ha_plan}</span></div>
+      <div class="detail-row"><span class="key">Personal proyectado</span><span class="val">${t.personal_plan}</span></div>
+      <div class="detail-row"><span class="key">Prioridad</span><span class="val">${t.prioridad || 'media'}</span></div>
+      ${t.observacion_plan ? `<div style="font-size:12px;color:#374151;margin-top:8px;background:#f9fafb;padding:8px;border-radius:6px">${t.observacion_plan}</div>` : ''}
+    </div>
+
+    ${parteSup ? `<div class="parte parte-supervisor">
+      <div class="detail-lbl">Parte del supervisor</div>
+      <div class="detail-row"><span class="key">HA registradas</span><span class="val">${parteSup.ha_avance}</span></div>
+      ${parteSup.personal_cantidad ? `<div class="detail-row"><span class="key">Personal</span><span class="val">${parteSup.personal_cantidad}</span></div>` : ''}
+      ${parteSup.observaciones ? `<div style="font-size:12px;color:#04342C;margin-top:8px;background:white;padding:8px;border-radius:6px">${parteSup.observaciones}</div>` : ''}
+      <div class="firma">Firmado por ${parteSup.registrado_por} · ${fmtFecha(parteSup.fecha_registro)}</div>
+    </div>` : ''}
+
+    ${parteEnc ? `<div class="parte parte-encargado">
+      <div class="detail-lbl">Parte del encargado</div>
+      <div class="detail-row"><span class="key">Personal</span><span class="val">${parteEnc.personal_cantidad}</span></div>
+      ${parteEnc.observaciones ? `<div style="font-size:12px;color:#042C53;margin-top:8px;background:white;padding:8px;border-radius:6px">${parteEnc.observaciones}</div>` : ''}
+      <div class="firma">Firmado por ${parteEnc.registrado_por} · ${fmtFecha(parteEnc.fecha_registro)}</div>
+    </div>` : ''}
+
+    ${parteUnica ? `<div class="parte parte-encargado">
+      <div class="detail-lbl">Registro</div>
+      <div class="detail-row"><span class="key">HA real</span><span class="val">${parteUnica.ha_avance}</span></div>
+      <div class="detail-row"><span class="key">Personal</span><span class="val">${parteUnica.personal_cantidad}</span></div>
+      ${parteUnica.observaciones ? `<div style="font-size:12px;color:#042C53;margin-top:8px;background:white;padding:8px;border-radius:6px">${parteUnica.observaciones}</div>` : ''}
+      <div class="firma">Firmado por ${parteUnica.registrado_por} · ${fmtFecha(parteUnica.fecha_registro)}</div>
+    </div>` : ''}
+
+    ${acciones}
+  `;
+}
+
+function capturarTareaUnica(progId){
+  closeModal();
+  captureMode = 'plan';
+  captureContext = { progId, parte: 'unico' };
+  renderCapturaPlanModal();
+}
+
+function capturarParteEncargado(progId){
+  closeModal();
+  captureMode = 'plan';
+  captureContext = { progId, parte: 'encargado' };
+  renderCapturaPlanModal();
+}
+
+function capturarParteSupervisor(progId){
+  closeModal();
+  captureMode = 'plan';
+  captureContext = { progId, parte: 'supervisor' };
+  renderCapturaPlanModal();
+}
+
+async function renderCapturaPlanModal(){
+  const { progId, parte } = captureContext;
+  const { data: t } = await sb.from('avc_programacion').select('*').eq('id', progId).single();
+  if(!t) return;
+
+  const act = actividadesAll.find(a => a.codigo_actividad === t.codigo_actividad);
+  const lote = plantios.find(p => p.finca_lote === t.finca_lote);
+  if(!act){ toast('Actividad no encontrada en catálogo','error'); return; }
+
+  // Si es EXTERNA y tiene mezcla planificada, traer los datos para mostrar al ejecutor
+  let mezclaInfo = '';
+  if(act.modelo_comparticion === 'EXTERNA' && t.mezcla_id){
+    const mezclas = await cargarMezclas();
+    const mezcla = mezclas.find(m => m.id === t.mezcla_id);
+    if(mezcla){
+      const ajustes = t.dosis_ajustes || {};
+      const productosHtml = mezcla.productos.map(p => {
+        const dosisReal = ajustes[p.producto_id] != null ? ajustes[p.producto_id] : p.dosis_default;
+        return `<div style="font-size:12px;color:#854F0B;padding:3px 0;display:flex;justify-content:space-between">
+          <span>${p.nombre}</span>
+          <span style="font-weight:600">${dosisReal} ${p.unidad}/ha</span>
+        </div>`;
+      }).join('');
+      
+      mezclaInfo = `
+        <div style="background:#FAF5E8;border:1px solid #E0CFA8;border-radius:8px;padding:10px 12px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">
+            🧪 Plan PM: ${mezcla.nombre}
+          </div>
+          ${productosHtml}
+          ${t.jornada ? `<div style="font-size:11px;color:#A06410;margin-top:8px;padding-top:6px;border-top:1px solid #E0CFA8">Jornada: <strong>${t.jornada}</strong></div>` : ''}
+          ${t.observacion_pm ? `<div style="font-size:11px;color:#854F0B;margin-top:6px;font-style:italic">"${t.observacion_pm}"</div>` : ''}
+        </div>
+      `;
+    }
+  }
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Registrar avance</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">${actNombre(t.codigo_actividad)} · ${t.finca_lote}${lote ? ` (${lote.area_ha} ha)` : ''}</div>
+    ${mezclaInfo}
+    ${armarFormularioCaptura(act, parte, t)}
+    <button class="btn btn-primary" id="btnCaptura" onclick="guardarCapturaPlan()">Guardar registro</button>
+  `;
+  showModal();
+}
+
+function armarFormularioCaptura(act, parte, prog){
+  // act: row de avc_actividades con tipo_captura, modelo_comparticion, requiere_personal/horario/vs
+  // parte: 'unico' | 'supervisor' | 'encargado'
+  // prog: row de avc_programacion (puede ser null en captura libre)
+  const planHa  = prog ? (prog.ha_plan || '')       : '';
+  const planPer = prog ? (prog.personal_plan || 0)  : 0;
+
+  // === CASO ESPECIAL: encargado en compartida/externa → solo personal + obs ===
+  if(parte === 'encargado'){
+    return `
+      <div class="banner blue">
+        <div class="banner-lbl">Parte del encargado</div>
+        <div class="banner-txt">Aporta personal y observaciones. El HA y datos técnicos los registra el supervisor.</div>
+      </div>
+      <div class="field">
+        <label>Personal asignado</label>
+        <input type="number" id="cPersonal" value="${planPer}" min="0"/>
+      </div>
+      <input type="hidden" id="cHa" value="0"/>
+      <input type="hidden" id="cFin"/>
+      <div class="field" style="margin-top:13px">
+        <label>Observaciones</label>
+        <textarea id="cObs" placeholder="Notas operativas, clima, incidencias..."></textarea>
+      </div>
+    `;
+  }
+
+  // === FORMULARIO COMPLETO (unico o supervisor) ===
+  const tipo = act.tipo_captura;
+  
+  // El supervisor NO captura personal en operaciones COMPARTIDA/EXTERNA:
+  // ese campo lo aporta el encargado en su parte. En modelos ENCARGADO/SUPERVISOR puro
+  // (parte='unico'), respeta el flag de la actividad.
+  const esComparticionDoble = (act.modelo_comparticion === 'COMPARTIDA' || act.modelo_comparticion === 'EXTERNA');
+  let reqPersonal = act.requiere_personal !== false;
+  if(parte === 'supervisor' && esComparticionDoble) reqPersonal = false;
+  
+  const reqHorario  = act.requiere_horario  !== false;
+  const reqVs       = act.requiere_vs       === true;
+
+  // Banner según parte
+  let banner = '';
+  if(parte === 'supervisor'){
+    banner = `<div class="banner purple">
+      <div class="banner-lbl">Parte del supervisor</div>
+      <div class="banner-txt">Al guardar, la tarea pasará a esperar al encargado.</div>
+    </div>`;
+  } else {
+    banner = `<div class="banner">
+      <div class="banner-lbl">Registrar avance</div>
+      <div class="banner-txt">${actNombre(act.codigo_actividad)}</div>
+    </div>`;
+  }
+
+  let html = banner;
+
+  // ====== CAMPOS DE AVANCE según tipo_captura ======
+  if(tipo === 'HA'){
+    html += `<div class="field">
+      <label>HA avanzadas</label>
+      <input type="number" step="0.01" id="cHa" value="${planHa}" min="0"/>
+    </div>`;
+  } else if(tipo === 'MTS'){
+    html += `<div class="field">
+      <label>Metros avanzados</label>
+      <input type="number" step="0.01" id="cMts" value="" min="0"/>
+    </div>
+    <input type="hidden" id="cHa" value="0"/>`;
+  } else if(tipo === 'NINGUNA'){
+    html += `<input type="hidden" id="cHa" value="0"/>`;
+  } else if(tipo === 'HA_QQ'){
+    const qqSugerido = prog && prog.qq_plan ? prog.qq_plan : '';
+    html += `<div class="field-row">
+      <div class="field"><label>HA avanzadas</label><input type="number" step="0.01" id="cHa" value="${planHa}" min="0"/></div>
+      <div class="field"><label>Quintales aplicados</label><input type="number" step="0.01" id="cQq" value="${qqSugerido}" min="0"/></div>
+    </div>
+    ${prog && prog.qq_plan ? `<div class="field-help" style="margin-top:-8px;margin-bottom:14px;color:#0F4F8C">📋 Plan: ${prog.qq_plan} qq</div>` : ''}`;
+  } else if(tipo === 'HA_VARIEDAD'){
+    const varSugerida = (prog && prog.variedad_plan) ? prog.variedad_plan : lote_variedad_default(prog);
+    html += `<div class="field">
+      <label>HA avanzadas</label>
+      <input type="number" step="0.01" id="cHa" value="${planHa}" min="0"/>
+    </div>
+    <div class="field">
+      <label>Variedad</label>
+      <input type="text" id="cVariedad" value="${varSugerida.replace(/"/g,'&quot;')}" placeholder="Ej: LAICA 00-301"/>
+      ${prog && prog.variedad_plan ? `<div class="field-help" style="color:#0F4F8C">📋 Plan: ${prog.variedad_plan}</div>` : ''}
+    </div>`;
+  } else if(tipo === 'HA_SIEMBRA'){
+    const varSugerida = (prog && prog.variedad_plan) ? prog.variedad_plan : lote_variedad_default(prog);
+    const distSugerida = (prog && prog.distancia_siembra_plan) ? prog.distancia_siembra_plan : '1.5';
+    const anchoSugerido = (prog && prog.ancho_surco_plan) ? prog.ancho_surco_plan : '2';
+    html += `<div class="field">
+      <label>HA avanzadas</label>
+      <input type="number" step="0.01" id="cHa" value="${planHa}" min="0"/>
+    </div>
+    <div class="field">
+      <label>Variedad</label>
+      <input type="text" id="cVariedad" value="${varSugerida.replace(/"/g,'&quot;')}" placeholder="Ej: LAICA 00-301"/>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Distancia siembra (m)</label><input type="number" step="0.01" id="cDist" value="${distSugerida}"/></div>
+      <div class="field"><label>Ancho surco (m)</label><input type="number" step="0.01" id="cAncho" value="${anchoSugerido}"/></div>
+    </div>
+    ${prog && (prog.variedad_plan || prog.distancia_siembra_plan) ? `<div class="field-help" style="margin-top:-8px;margin-bottom:14px;color:#0F4F8C">📋 Plan: ${prog.variedad_plan || '—'} · ${prog.distancia_siembra_plan || '?'}×${prog.ancho_surco_plan || '?'} m</div>` : ''}`;
+  } else {
+    // Tipo NULL (monitoreos pendientes) o desconocido → fallback
+    html += `<input type="hidden" id="cHa" value="0"/>
+    <div class="field-help" style="color:#B91C1C;margin-bottom:10px">⚠ Esta actividad aún no tiene campos definidos. Solo se guardará personal y observaciones.</div>`;
+  }
+
+  // ====== PERSONAL ======
+  if(reqPersonal){
+    html += `<div class="field">
+      <label>Personal</label>
+      <input type="number" id="cPersonal" value="${planPer}" min="0"/>
+    </div>`;
+  } else {
+    html += `<input type="hidden" id="cPersonal" value="0"/>`;
+  }
+
+  // ====== HORARIO ======
+  if(reqHorario){
+    html += `<div class="field-row">
+      <div class="field"><label>Hora inicio</label><input type="time" id="cHoraIni"/></div>
+      <div class="field"><label>Hora fin</label><input type="time" id="cHoraFin"/></div>
+    </div>`;
+  }
+
+  // ====== VASOS COTESIA ======
+  if(reqVs){
+    html += `<div class="field">
+      <label>Vasos cotesia</label>
+      <input type="number" id="cVs" value="" min="0"/>
+    </div>`;
+  }
+
+  // ====== CHECKBOX LOTE FINALIZADO ======
+  html += `<div class="check-row" id="cFinChk" onclick="toggleCFin()">
+    <input type="checkbox" id="cFin"/>
+    <label>Marcar lote como finalizado</label>
+  </div>`;
+
+  // ====== OBSERVACIONES ======
+  html += `<div class="field" style="margin-top:13px">
+    <label>Observaciones</label>
+    <textarea id="cObs" placeholder="Notas operativas, clima, incidencias..."></textarea>
+  </div>`;
+
+  return html;
+}
+
+function lote_variedad_default(prog){
+  if(!prog) return '';
+  const lote = plantios.find(p => p.finca_lote === prog.finca_lote);
+  return lote && lote.variedad ? lote.variedad.replace(/"/g,'&quot;') : '';
+}
+
+function toggleCFin(){
+  const chk = document.getElementById('cFin');
+  chk.checked = !chk.checked;
+  const wrap = document.getElementById('cFinChk');
+  if(wrap) wrap.classList.toggle('checked', chk.checked);
+}
+
+async function guardarCapturaPlan(){
+  const btn = document.getElementById('btnCaptura');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const { progId, parte } = captureContext;
+    const { data: t } = await sb.from('avc_programacion').select('*').eq('id', progId).single();
+    if(!t) throw new Error('Programación no encontrada');
+
+    // Leer todos los campos posibles (sólo si el input existe)
+    const $ = id => document.getElementById(id);
+    const numOrNull = id => { const el = $(id); if(!el || el.value === '') return null; const v = parseFloat(el.value); return isNaN(v) ? null : v; };
+    const intOrNull = id => { const el = $(id); if(!el || el.value === '') return null; const v = parseInt(el.value); return isNaN(v) ? null : v; };
+    const strOrNull = id => { const el = $(id); if(!el) return null; const v = (el.value||'').trim(); return v || null; };
+
+    const ha          = parseFloat($('cHa')?.value || 0);
+    const personal    = parseInt($('cPersonal')?.value || 0);
+    const finalizado  = $('cFin')?.checked || false;
+    const obs         = strOrNull('cObs');
+    const mts         = numOrNull('cMts');
+    const qq          = numOrNull('cQq');
+    const variedad    = strOrNull('cVariedad');
+    const distancia   = numOrNull('cDist');
+    const anchoSurco  = numOrNull('cAncho');
+    const horaIni     = strOrNull('cHoraIni');
+    const horaFin     = strOrNull('cHoraFin');
+    const vs          = intOrNull('cVs');
+
+    // Catálogo de la actividad para validar requerimientos
+    const act = actividadesAll.find(a => a.codigo_actividad === t.codigo_actividad);
+    const tipo = act?.tipo_captura;
+
+    // Validaciones según parte
+    if(parte === 'encargado'){
+      if(personal <= 0) throw new Error('Indica personal');
+    } else {
+      // Validar avance según tipo
+      if(tipo === 'HA' || tipo === 'HA_QQ' || tipo === 'HA_VARIEDAD' || tipo === 'HA_SIEMBRA'){
+        if(ha <= 0) throw new Error('Indica HA avanzadas');
+      }
+      if(tipo === 'MTS' && (!mts || mts <= 0)) throw new Error('Indica metros avanzados');
+      if(tipo === 'HA_QQ' && (qq == null || qq < 0)) throw new Error('Indica quintales aplicados');
+      if((tipo === 'HA_VARIEDAD' || tipo === 'HA_SIEMBRA') && !variedad) throw new Error('Indica variedad');
+      
+      // Personal: solo validar si la actividad lo requiere Y no es supervisor en compartida/externa
+      const esComparticionDoble2 = act && (act.modelo_comparticion === 'COMPARTIDA' || act.modelo_comparticion === 'EXTERNA');
+      const supervisorEnCompartida = (parte === 'supervisor' && esComparticionDoble2);
+      if(act?.requiere_personal !== false && !supervisorEnCompartida && personal <= 0){
+        throw new Error('Indica personal');
+      }
+      
+      if(act?.requiere_vs === true && (vs == null || vs < 0)) throw new Error('Indica vasos cotesia');
+    }
+
+    // Insertar registro con TODOS los campos posibles
+    const { error: e1 } = await sb.from('avc_registros').insert({
+      programacion_id: progId,
+      fecha: t.fecha,
+      finca_lote: t.finca_lote,
+      codigo_actividad: t.codigo_actividad,
+      ha_avance: parte === 'encargado' ? 0 : ha,
+      mts_avance: mts,
+      qq_aplicados: qq,
+      variedad: variedad,
+      distancia_siembra: distancia,
+      ancho_surco: anchoSurco,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      vasos_cotesia: vs,
+      lote_finalizado: finalizado,
+      personal_cantidad: personal,
+      observaciones: obs,
+      registrado_por: usuario.email,
+      parte_de: parte,
+      fuera_de_plan: false,
+      dispositivo: navigator.userAgent.substring(0, 100)
+    });
+    if(e1) throw new Error(e1.message);
+
+    // Actualizar estado de la programación
+    let nuevoEstado = 'completada';
+    let updates = {};
+
+    // Determinar si la actividad es compartida según el modelo de la BD (no por lista hardcoded)
+    const esCompartidaReal = act && (act.modelo_comparticion === 'COMPARTIDA' || act.modelo_comparticion === 'EXTERNA');
+
+    if(esCompartidaReal){
+      if(parte === 'supervisor'){
+        nuevoEstado = 'esperando_encargado';
+        updates.ha_real = ha;
+        updates.observacion_real = obs;
+      } else if(parte === 'encargado'){
+        nuevoEstado = 'completada';
+        updates.personal_real = personal;
+        updates.cerrado_por = usuario.email;
+        updates.cerrado_en = new Date().toISOString();
+      }
+    } else {
+      // No compartida: parte 'unico' → cierra de una vez
+      nuevoEstado = 'completada';
+      updates.ha_real = ha;
+      updates.personal_real = personal;
+      updates.observacion_real = obs;
+      updates.cerrado_por = usuario.email;
+      updates.cerrado_en = new Date().toISOString();
+    }
+
+    updates.estado = nuevoEstado;
+
+    const { error: e2 } = await sb.from('avc_programacion').update(updates).eq('id', progId);
+    if(e2) throw new Error(e2.message);
+
+    // Notificar al jefe que creó la tarea, solo si quedó como completada
+    if(nuevoEstado === 'completada'){
+      const { data: progActual } = await sb.from('avc_programacion')
+        .select('*').eq('id', progId).maybeSingle();
+      if(progActual) await notificarTareaCompletada(progActual);
+    }
+
+    toast('Registro guardado correctamente');
+    closeModal();
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar registro';
+  }
+}
+
+async function renderEncargadoCapturar(){
+  // Captura libre (fuera de plan) - similar a index.html
+  const actsDisponibles = actividadesPerm.filter(a => a.requiere_detalle || a.es_fertirriego);
+
+  if(actsDisponibles.length === 0){
+    return '<div class="empty">No tienes actividades habilitadas para captura libre. Contacta a tu administrador.</div>';
+  }
+
+  return `
+    <div class="banner amber">
+      <div class="banner-lbl">Captura fuera de plan</div>
+      <div class="banner-txt">Para registros no programados. Requiere justificación.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Selecciona actividad</div>
+      <div class="act-grid">
+        ${actsDisponibles.map(a => {
+          const ico = iconoActividad(a.codigo_actividad);
+          return `<button class="act-btn" onclick="iniciarCapturaLibre(${a.codigo_actividad})"><i class="ti ${ico.icon}"></i>${a.nombre_actividad}</button>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function iniciarCapturaLibre(codigo){
+  const act = actividadesAll.find(a => a.codigo_actividad === codigo);
+  if(!act) return;
+
+  if(act.es_fertirriego){
+    toast('Fertirriego usa flujo especial. Por favor usa la app de captura clásica.', 'info');
+    return;
+  }
+
+  captureMode = 'libre';
+  captureContext = { codigo };
+  renderCapturaLibreModal();
+}
+
+async function renderCapturaLibreModal(){
+  const { codigo } = captureContext;
+  const act = actividadesAll.find(a => a.codigo_actividad === codigo);
+
+  // Lotes accesibles según rol
+  let lotesDisp = plantios;
+  if(usuario.rol_avc === 'encargado_finca'){
+    lotesDisp = plantios.filter(p => p.encargado_finca === usuario.nombre_completo);
+  }
+
+  // Agrupar por finca para el dropdown
+  const fincasUnicas = [...new Set(lotesDisp.map(p => p.descripcion_finca))].sort();
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>${act.nombre_actividad}</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">Captura libre · ${act.codigo_actividad}</div>
+
+    <div class="field">
+      <label>Finca</label>
+      <select id="clFinca" onchange="actualizarLotesCaptura()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="clLote"><option value="">Primero elige finca</option></select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Fecha</label><input type="date" id="clFecha" value="${hoyISO()}"/></div>
+      <div class="field"><label>HA avance</label><input type="number" step="0.01" id="clHa" placeholder="0.00"/></div>
+    </div>
+    <div class="field">
+      <label>Personal</label>
+      <input type="number" id="clPersonal" placeholder="0"/>
+    </div>
+    <div class="check-row" id="clFinChk" onclick="document.getElementById('clFin').checked=!document.getElementById('clFin').checked;document.getElementById('clFinChk').classList.toggle('checked',document.getElementById('clFin').checked)">
+      <input type="checkbox" id="clFin"/>
+      <label>Lote finalizado</label>
+    </div>
+    <div class="field" style="margin-top:13px">
+      <label>Observaciones</label>
+      <textarea id="clObs"></textarea>
+    </div>
+    <div class="field">
+      <label style="color:#B91C1C">Justificación fuera de plan (obligatoria)</label>
+      <textarea id="clObsFp" placeholder="Por qué se registra fuera del plan diario"></textarea>
+    </div>
+    <button class="btn btn-primary" id="btnCL" onclick="guardarCapturaLibre()">Guardar registro</button>
+  `;
+  showModal();
+}
+
+function actualizarLotesCaptura(){
+  const finca = document.getElementById('clFinca').value;
+  const sel = document.getElementById('clLote');
+  if(!finca){ sel.innerHTML = '<option value="">Primero elige finca</option>'; return; }
+
+  let lotesDisp = plantios.filter(p => p.descripcion_finca === finca);
+  if(usuario.rol_avc === 'encargado_finca'){
+    lotesDisp = lotesDisp.filter(p => p.encargado_finca === usuario.nombre_completo);
+  }
+
+  sel.innerHTML = '<option value="">Seleccionar lote...</option>' +
+    lotesDisp.map(p => `<option value="${p.finca_lote}">${p.finca_lote} (${p.area_ha} ha)</option>`).join('');
+}
+
+async function guardarCapturaLibre(){
+  const btn = document.getElementById('btnCL');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const { codigo } = captureContext;
+    const finca_lote = document.getElementById('clLote').value;
+    const fecha = document.getElementById('clFecha').value;
+    const ha = parseFloat(document.getElementById('clHa').value || 0);
+    const personal = parseInt(document.getElementById('clPersonal').value || 0);
+    const obs = document.getElementById('clObs').value.trim() || null;
+    const obsFp = document.getElementById('clObsFp').value.trim();
+
+    if(!finca_lote) throw new Error('Selecciona un lote');
+    if(!fecha) throw new Error('Selecciona fecha');
+    if(ha <= 0) throw new Error('Indica HA avance');
+    if(!obsFp) throw new Error('La justificación fuera de plan es obligatoria');
+
+    const { error } = await sb.from('avc_registros').insert({
+      programacion_id: null,
+      fecha,
+      finca_lote,
+      codigo_actividad: codigo,
+      ha_avance: ha,
+      lote_finalizado: document.getElementById('clFin').checked,
+      personal_cantidad: personal > 0 ? personal : null,
+      observaciones: obs,
+      observacion_fuera_plan: obsFp,
+      fuera_de_plan: true,
+      parte_de: 'unico',
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 100)
+    });
+
+    if(error) throw new Error(error.message);
+    toast('Registro guardado');
+    closeModal();
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar registro';
+  }
+}
+
+async function renderEncargadoHistorial(){
+  const { data: regs } = await sb.from('avc_registros')
+    .select('*')
+    .eq('registrado_por', usuario.email)
+    .order('fecha_registro', { ascending: false })
+    .limit(50);
+
+  if(!regs || regs.length === 0){
+    return '<div class="empty"><i class="ti ti-file-text"></i>Aún no tienes registros.</div>';
+  }
+
+  return regs.map(r => `<div class="reg-item">
+    <div class="reg-head">
+      <span class="badge ${r.fuera_de_plan?'fp':''}">${actNombre(r.codigo_actividad)}${r.fuera_de_plan?' (fuera plan)':''}</span>
+      <span class="reg-fecha">${fmtFecha(r.fecha_registro)}</span>
+    </div>
+    <div class="reg-finca">${r.finca_lote}</div>
+    <div class="reg-meta">${r.ha_avance} ha · ${r.personal_cantidad || 0} personas · ${r.parte_de}</div>
+  </div>`).join('');
+}
+
+/* ============================================================
+   VISTA: SUPERVISOR
+============================================================ */
+async function renderSupervisor(){
+  if(!currentTab || currentTab === 'capturar') currentTab = 'ops';
+  const tabs = [
+    {id:'ops', label:'Mis operaciones'},
+    {id:'historial', label:'Historial'}
+  ];
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'ops')             body = await renderSupervisorOps();
+  else if(currentTab === 'historial')  body = await renderSupervisorHistorial();
+  else                                 body = await renderSupervisorOps();
+
+  document.getElementById('appBody').innerHTML = renderTabs(tabs) + `<div class="sec active">${body}</div>`;
+}
+
+async function renderSupervisorOps(){
+  const hoy = hoyISO();
+
+  // Ops donde soy supervisor asignado por el jefe (no eliminadas)
+  // Excluimos solicitud_pm porque esas todavía no fueron aprobadas por PM
+  const { data: progs } = await sb.from('avc_programacion')
+    .select('*')
+    .eq('email_supervisor', usuario.email)
+    .eq('fecha', hoy)
+    .eq('eliminada', false)
+    .neq('estado', 'solicitud_pm')
+    .order('hora_programada', { nullsFirst: false });
+
+  const total = (progs || []).length;
+  const compl = (progs || []).filter(p => p.estado === 'completada').length;
+  const pendientes = (progs || []).filter(p => p.estado === 'planificado' || p.estado === 'pendiente').length;
+
+  let html = `
+    <div class="banner purple">
+      <div class="banner-lbl">${usuario.cargo}</div>
+      <div class="banner-txt">${total} operacion${total!==1?'es':''} compartidas hoy</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${compl}</div></div>
+      <div class="stat"><div class="stat-lbl">Pend.</div><div class="stat-val">${pendientes}</div></div>
+    </div>
+  `;
+
+  if(total === 0){
+    html += `<div class="empty"><i class="ti ti-calendar-off"></i>Sin operaciones asignadas hoy.</div>`;
+  } else {
+    // Agrupar por finca
+    const grouped = {};
+    progs.forEach(p => {
+      const lote = plantios.find(l => l.finca_lote === p.finca_lote);
+      const fincaNombre = lote ? lote.descripcion_finca : p.finca_lote;
+      if(!grouped[fincaNombre]) grouped[fincaNombre] = [];
+      grouped[fincaNombre].push(p);
+    });
+
+    Object.entries(grouped).forEach(([finca, ops]) => {
+      html += `<div class="sec-h"><span><i class="ti ti-map-pin" style="font-size:11px;vertical-align:-1px;margin-right:3px"></i>${finca}</span></div>`;
+      ops.forEach(p => {
+        const enc = p.email_encargado;
+        const ico = iconoActividad(p.codigo_actividad);
+        html += `<div class="tarea-card estado-${p.estado}" onclick="abrirTarea(${p.id})">
+          <div class="tarea-head">
+            <div class="tarea-left">
+              <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+              <div class="tarea-info">
+                ${p.hora_programada ? `<div class="tarea-hora">${p.hora_programada}</div>` : ''}
+                <div class="tarea-title">${actNombre(p.codigo_actividad)}</div>
+              </div>
+            </div>
+            ${badge(p.estado)}
+          </div>
+          <div class="tarea-sub">${p.finca_lote} · con ${enc || 'encargado'}</div>
+          <div class="tarea-meta">Plan: ${p.ha_plan} ha${p.ha_real?` · Real: ${p.ha_real} ha`:''}</div>
+        </div>`;
+      });
+    });
+  }
+
+  return html;
+}
+
+async function renderSupervisorCapturar(){
+  // Captura libre de actividades del supervisor (no compartidas)
+  const actsDisponibles = actividadesPerm.filter(a => a.requiere_detalle || a.es_fertirriego);
+
+  if(actsDisponibles.length === 0){
+    return '<div class="empty">No tienes actividades habilitadas. Contacta al administrador.</div>';
+  }
+
+  // Separar fertirriegos (que usan flujo especial)
+  const fertirriegos = actsDisponibles.filter(a => a.es_fertirriego);
+  const normales = actsDisponibles.filter(a => !a.es_fertirriego);
+
+  let html = `
+    <div class="banner amber">
+      <div class="banner-lbl">Captura libre</div>
+      <div class="banner-txt">Registros sin programación previa</div>
+    </div>
+  `;
+
+  if(normales.length > 0){
+    html += `
+      <div class="card">
+        <div class="card-title">Actividades normales</div>
+        <div class="act-grid">
+          ${normales.map(a => {
+            const ico = iconoActividad(a.codigo_actividad);
+            return `<button class="act-btn" onclick="iniciarCapturaLibre(${a.codigo_actividad})"><i class="ti ${ico.icon}"></i>${a.nombre_actividad}</button>`;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  if(fertirriegos.length > 0){
+    html += `
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">Fertirriegos</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">El flujo de fertirriego usa la app de captura clásica con turnos.</div>
+        <a href="index.html" target="_blank"><button class="btn btn-secondary"><i class="ti ti-external-link"></i>Abrir app clásica para fertirriego</button></a>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
+async function renderSupervisorHistorial(){
+  const { data: regs } = await sb.from('avc_registros')
+    .select('*')
+    .eq('registrado_por', usuario.email)
+    .order('fecha_registro', { ascending: false })
+    .limit(50);
+
+  if(!regs || regs.length === 0){
+    return '<div class="empty"><i class="ti ti-file-text"></i>Aún no tienes registros.</div>';
+  }
+
+  return regs.map(r => `<div class="reg-item">
+    <div class="reg-head">
+      <span class="badge ${r.fuera_de_plan?'fp':''}">${actNombre(r.codigo_actividad)}</span>
+      <span class="reg-fecha">${fmtFecha(r.fecha_registro)}</span>
+    </div>
+    <div class="reg-finca">${r.finca_lote}</div>
+    <div class="reg-meta">${r.ha_avance} ha · ${r.personal_cantidad || 0} personas · ${r.parte_de}</div>
+  </div>`).join('');
+}
+
+/* ============================================================
+   VISTA: ADMIN (placeholder - puede elegir un rol para probar)
+============================================================ */
+async function renderAdmin(){
+  renderHeader();
+  document.getElementById('appBody').innerHTML = `
+    <div class="sec active">
+      <div class="banner blue">
+        <div class="banner-lbl">Modo administrador</div>
+        <div class="banner-txt">Como admin, puedes ver cualquier vista para probar.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Probar como otro rol</div>
+        <button class="btn btn-primary" style="margin-bottom:8px" onclick="impersonar('jefe_distrito')">Vista Jefe (elegirás cuál)</button>
+        <button class="btn btn-purple" style="margin-bottom:8px" onclick="impersonar('encargado_finca')">Vista Encargado</button>
+        <button class="btn btn-secondary" onclick="impersonar('supervisor_actividad')">Vista Supervisor</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">Notas</div>
+        <div style="font-size:12px;color:#6b7280;line-height:1.5">
+          • Esta es la versión nueva CSIA Campo v3 con login, roles y programación.<br>
+          • La app de captura clásica sigue funcionando en <code>index.html</code>.<br>
+          • Las tablas se ampliaron con <code>parte_de</code>, <code>email_encargado</code>, etc.<br>
+          • Password temporal para usuarios nuevos: <strong>CSIA2026!</strong>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function impersonar(rol){
+  // Listar usuarios del rol para elegir
+  const { data: users } = await sb.from('user_perfiles')
+    .select('email, nombre_completo, cargo')
+    .eq('rol_avc', rol)
+    .eq('activo', true)
+    .order('nombre_completo');
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Elegir usuario</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">Vas a impersonar a un ${rol.replace('_',' ')}</div>
+    ${(users || []).map(u => `<div class="card" style="margin-bottom:6px;cursor:pointer" onclick="aplicarImpersonacion('${u.email}')">
+      <div class="card-title-main" style="font-size:13px">${u.nombre_completo}</div>
+      <div class="card-sub">${u.cargo}</div>
+    </div>`).join('')}
+  `;
+  showModal();
+}
+
+async function aplicarImpersonacion(email){
+  closeModal();
+  const { data: perfil } = await sb.from('user_perfiles').select('*').eq('email', email).maybeSingle();
+  if(!perfil) return toast('Usuario no encontrado','error');
+  usuario = perfil;
+  currentTab = '';
+  await cargarMaestros();
+  routerPorRol();
+}
+
+/* ============================================================
+   MODAL HELPERS
+============================================================ */
+function showModal(){
+  const old = document.querySelector('.modal-overlay');
+  if(old) old.remove();
+  const div = document.createElement('div');
+  div.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal">${modalContent}</div></div>`;
+  document.body.appendChild(div.firstChild);
+}
+
+function closeModal(){
+  modalContent = null;
+  const old = document.querySelector('.modal-overlay');
+  if(old) old.remove();
+}
+
+/* ============================================================
+   INICIO: verificar sesión existente
+============================================================ */
+/* ============================================================
+   MÓDULO DE NOTIFICACIONES (in-app, Fase 1)
+   ============================================================ */
+let notifPollInterval = null;
+let notifContadorActual = 0;
+
+async function crearNotificacion({destinatario, tipo, titulo, mensaje, prog_id}){
+  if(!destinatario) return;
+  // Auto-skip si el destinatario es uno mismo (no avisar al jefe que él mismo creó algo)
+  if(destinatario === usuario?.email) return;
+  try {
+    await sb.from('avc_notificaciones').insert({
+      destinatario,
+      tipo,
+      titulo,
+      mensaje: mensaje || null,
+      prog_id: prog_id || null,
+      creada_por: usuario?.email || null
+    });
+  } catch(err){
+    console.error('Error creando notificación:', err);
+    // No bloqueamos el flujo principal si la notificación falla
+  }
+}
+
+async function notificarTareaAsignada(prog, modelo){
+  // Disparada al programar una tarea. Notifica a quien la ejecutará.
+  const act = actividadesAll.find(a => a.codigo_actividad === prog.codigo_actividad);
+  const nombreAct = act ? act.nombre_actividad : `Actividad ${prog.codigo_actividad}`;
+  const tituloMsg = `Nueva tarea asignada`;
+  const fechaTxt = prog.fecha ? new Date(prog.fecha + 'T00:00:00').toLocaleDateString('es-HN', {day:'numeric', month:'short'}) : '';
+  const haTxt = prog.ha_plan ? `${prog.ha_plan} ha` : '';
+  const mensajeBase = [nombreAct, prog.finca_lote, haTxt, fechaTxt].filter(Boolean).join(' · ');
+  
+  // EXTERNA solicitud_pm: no notificamos al supervisor todavía, lo hace PM al aprobar
+  // (las EXTERNA caen primero en estado solicitud_pm, PM las aprueba desde Matriz)
+  if(modelo === 'EXTERNA') return;
+  
+  // Notificar al encargado
+  if(prog.email_encargado){
+    await crearNotificacion({
+      destinatario: prog.email_encargado,
+      tipo: 'tarea_asignada',
+      titulo: tituloMsg,
+      mensaje: mensajeBase,
+      prog_id: prog.id
+    });
+  }
+  // Notificar al supervisor (si existe y es distinto del encargado)
+  if(prog.email_supervisor && prog.email_supervisor !== prog.email_encargado){
+    await crearNotificacion({
+      destinatario: prog.email_supervisor,
+      tipo: 'tarea_asignada',
+      titulo: tituloMsg,
+      mensaje: mensajeBase,
+      prog_id: prog.id
+    });
+  }
+}
+
+async function notificarTareaCompletada(prog){
+  // Disparada cuando una tarea pasa a 'completada'. Notifica al jefe que la creó.
+  if(!prog || !prog.creado_por) return;
+  const act = actividadesAll.find(a => a.codigo_actividad === prog.codigo_actividad);
+  const nombreAct = act ? act.nombre_actividad : `Actividad ${prog.codigo_actividad}`;
+  const haTxt = prog.ha_plan ? `${prog.ha_plan} ha` : '';
+  const ejecutor = usuario?.nombre_completo || 'Operador';
+  
+  await crearNotificacion({
+    destinatario: prog.creado_por,
+    tipo: 'tarea_completada',
+    titulo: `✓ Tarea completada`,
+    mensaje: `${ejecutor} terminó: ${nombreAct} en ${prog.finca_lote}${haTxt?' · '+haTxt:''}`,
+    prog_id: prog.id
+  });
+}
+
+async function actualizarContadorNotif(){
+  if(!usuario?.email) return;
+  try {
+    const { count, error } = await sb.from('avc_notificaciones')
+      .select('id', { count: 'exact', head: true })
+      .eq('destinatario', usuario.email)
+      .eq('leida', false);
+    if(error){ console.error(error); return; }
+    notifContadorActual = count || 0;
+    const badge = document.getElementById('notifBadge');
+    if(badge){
+      if(notifContadorActual > 0){
+        badge.style.display = 'flex';
+        badge.textContent = notifContadorActual > 99 ? '99+' : notifContadorActual;
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  } catch(err){
+    console.error('Error contando notificaciones:', err);
+  }
+}
+
+function iniciarPollingNotif(){
+  if(notifPollInterval) clearInterval(notifPollInterval);
+  actualizarContadorNotif();
+  notifPollInterval = setInterval(actualizarContadorNotif, 30000); // 30 segundos
+}
+
+function detenerPollingNotif(){
+  if(notifPollInterval){ clearInterval(notifPollInterval); notifPollInterval = null; }
+}
+
+async function togglePanelNotif(){
+  const panel = document.getElementById('notifPanel');
+  const overlay = document.getElementById('notifOverlay');
+  if(panel.classList.contains('open')){
+    cerrarPanelNotif();
+  } else {
+    panel.classList.add('open');
+    overlay.classList.add('open');
+    await cargarPanelNotif();
+  }
+}
+
+function cerrarPanelNotif(){
+  document.getElementById('notifPanel').classList.remove('open');
+  document.getElementById('notifOverlay').classList.remove('open');
+}
+
+async function cargarPanelNotif(){
+  const body = document.getElementById('notifPanelBody');
+  const foot = document.getElementById('notifFootInfo');
+  const btnMarcar = document.getElementById('notifMarcarTodo');
+  body.innerHTML = '<div class="notif-empty"><i class="ti ti-loader"></i><div>Cargando...</div></div>';
+  
+  try {
+    const { data, error } = await sb.from('avc_notificaciones')
+      .select('*')
+      .eq('destinatario', usuario.email)
+      .order('creada_en', { ascending: false })
+      .limit(50);
+    if(error) throw error;
+    
+    const notifs = data || [];
+    const noLeidas = notifs.filter(n => !n.leida).length;
+    
+    foot.textContent = `${notifs.length} ${notifs.length === 1 ? 'notificación' : 'notificaciones'} · ${noLeidas} no leídas`;
+    btnMarcar.disabled = noLeidas === 0;
+    
+    if(notifs.length === 0){
+      body.innerHTML = '<div class="notif-empty"><i class="ti ti-bell-off"></i><div>No tienes notificaciones</div></div>';
+      return;
+    }
+    
+    body.innerHTML = notifs.map(n => {
+      const cuandoTxt = fmtTiempoRelativo(n.creada_en);
+      const icono = n.tipo === 'tarea_completada' ? '✓' : (n.tipo === 'tarea_asignada' ? '🆕' : '🔔');
+      return `<div class="notif-item ${n.leida?'':'no-leida'}" onclick="abrirNotif(${n.id}, ${n.prog_id || 'null'})">
+        <div class="notif-item-titulo">${icono} ${escapeHtml(n.titulo)}</div>
+        ${n.mensaje ? `<div class="notif-item-msg">${escapeHtml(n.mensaje)}</div>` : ''}
+        <div class="notif-item-time">${cuandoTxt}</div>
+      </div>`;
+    }).join('');
+  } catch(err){
+    body.innerHTML = `<div class="notif-empty"><i class="ti ti-alert-circle"></i><div>Error: ${err.message}</div></div>`;
+  }
+}
+
+function escapeHtml(str){
+  if(!str) return '';
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtTiempoRelativo(iso){
+  if(!iso) return '';
+  const ahora = Date.now();
+  const cuando = new Date(iso).getTime();
+  const segs = Math.floor((ahora - cuando) / 1000);
+  if(segs < 60) return 'Hace un momento';
+  const mins = Math.floor(segs / 60);
+  if(mins < 60) return `Hace ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if(hrs < 24) return `Hace ${hrs} h`;
+  const dias = Math.floor(hrs / 24);
+  if(dias < 7) return `Hace ${dias} día${dias>1?'s':''}`;
+  return new Date(iso).toLocaleDateString('es-HN', {day:'numeric', month:'short'});
+}
+
+async function abrirNotif(notifId, progId){
+  // Marca como leída y navega a la tarea si tiene referencia
+  try {
+    await sb.from('avc_notificaciones')
+      .update({ leida: true, leida_en: new Date().toISOString() })
+      .eq('id', notifId);
+    actualizarContadorNotif();
+  } catch(err){ console.error(err); }
+  
+  cerrarPanelNotif();
+  
+  if(progId){
+    // Abrir el detalle de la tarea
+    abrirTarea(progId);
+  }
+}
+
+async function marcarTodasLeidas(){
+  try {
+    const { error } = await sb.from('avc_notificaciones')
+      .update({ leida: true, leida_en: new Date().toISOString() })
+      .eq('destinatario', usuario.email)
+      .eq('leida', false);
+    if(error) throw error;
+    toast('Notificaciones marcadas como leídas', 'success');
+    actualizarContadorNotif();
+    cargarPanelNotif();
+  } catch(err){
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+window.addEventListener('load', async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if(session && session.user){
+    const { data: perfil } = await sb.from('user_perfiles').select('*').eq('email', session.user.email).maybeSingle();
+    if(perfil && perfil.activo && perfil.rol_avc){
+      usuario = perfil;
+      await iniciarApp();
+    }
+  }
+});
+</script>
+</body>
+</html>
