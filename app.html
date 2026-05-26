@@ -397,16 +397,6 @@ let modalContent = null;
 let captureMode = null;      // 'libre' | 'plan'
 let captureContext = null;
 
-// === ACTIVIDADES DEL JEFE DE SIEMBRA ===
-// Códigos que SOLO el Jefe de Siembra puede programar
-// (siembra, preparación, fertilización de siembra y ampliaciones)
-const CODIGOS_JEFE_SIEMBRA = [10220, 50101, 50204, 50601, 50704];
-
-// Códigos que pueden exceder el área del lote
-// (en preparación y siembra se trabajan callejones, rondas y bordes que no están en el polígono)
-// Incluye los 5 del jefe de siembra + las 2 siembras de esquejes/plántulas
-const CODIGOS_EXCEDE_AREA = [10220, 10508, 10509, 50101, 50204, 50601, 50704];
-
 // Estado captura
 let actSel = null;
 let fertirriegoActual = null;
@@ -551,6 +541,9 @@ async function iniciarApp(){
   await cargarMaestros();
   routerPorRol();
   iniciarPollingNotif();
+  
+  // Disparar evento para inicializaciones que dependen de usuario logueado (push, etc.)
+  window.dispatchEvent(new CustomEvent('csia-usuario-listo'));
 }
 
 async function cargarMaestros(){
@@ -563,13 +556,13 @@ async function cargarMaestros(){
   let queryP = sb.from('maestro_plantios').select('finca_lote, finca, descripcion_finca, area_ha, variedad, tipo_riego, jefe_distrito, encargado_finca, distrito');
 
   if(!esAdmin){
-    // Encargado: solo sus fincas. Supervisor: todas (cruza distritos). Jefe distrito: las de su distrito. Jefe siembra: todas.
+    // Encargado: solo sus fincas. Supervisor: todas (cruza distritos). Jefe: las de su distrito.
     if(usuario.rol_avc === 'encargado_finca'){
       queryP = queryP.eq('encargado_finca', usuario.nombre_completo);
     } else if(usuario.rol_avc === 'jefe_distrito'){
       queryP = queryP.eq('jefe_distrito', usuario.nombre_completo);
     }
-    // supervisor_actividad y jefe_siembra ven todo
+    // supervisor_actividad ve todo, filtrado luego por actividad
   }
 
   const { data: pl } = await queryP;
@@ -592,7 +585,7 @@ async function cargarMaestros(){
 async function cargarJerarquia(){
   // Traer todos los plantios (sin filtro, para construir el árbol)
   // Pero solo si soy admin o jefe - para encargados/supervisores no es necesario
-  if(!['admin','programador','jefe_distrito','jefe_siembra','supervisor_actividad'].includes(usuario.rol_avc)) return;
+  if(!['admin','programador','jefe_distrito','supervisor_actividad'].includes(usuario.rol_avc)) return;
 
   const { data: all } = await sb.from('maestro_plantios')
     .select('finca, descripcion_finca, lote, tipo_riego, jefe_distrito, encargado_finca, distrito')
@@ -645,7 +638,6 @@ async function cargarJerarquia(){
 
 function routerPorRol(){
   if(usuario.rol_avc === 'jefe_distrito')           renderJefe();
-  else if(usuario.rol_avc === 'jefe_siembra')       renderJefeSiembra();
   else if(usuario.rol_avc === 'encargado_finca')    renderEncargado();
   else if(usuario.rol_avc === 'supervisor_actividad')renderSupervisor();
   else if(usuario.rol_avc === 'admin' || usuario.rol_avc === 'programador') renderAdmin();
@@ -664,8 +656,6 @@ function renderHeader(opts={}){
     if(usuario.rol_avc === 'jefe_distrito'){
       const d = encontrarDistritoDeJefe(usuario.nombre_completo);
       defaultSub2 = d ? `Jefe · ${d}` : 'Jefe distrito';
-    } else if(usuario.rol_avc === 'jefe_siembra'){
-      defaultSub2 = 'Jefe de Siembra y Preparación';
     } else if(usuario.rol_avc === 'encargado_finca'){
       const d = encontrarDistritoDeEncargado(usuario.nombre_completo);
       defaultSub2 = d ? `Encargado · ${d}` : 'Encargado';
@@ -845,141 +835,6 @@ async function renderJefeDistrito(){
   return html;
 }
 
-/* ============================================================
-   JEFE DE SIEMBRA
-   Cubre todos los distritos. Solo programa SIEMBRA y PREPARACIÓN
-   (códigos 10220, 50101, 50204, 50601, 50704).
-   Reusa renderJefeProgramar() — adaptado vía usuario.rol_avc === 'jefe_siembra'.
-   ============================================================ */
-async function renderJefeSiembra(){
-  if(!currentTab) currentTab = 'dashboard';
-  const tabs = [
-    {id:'dashboard', label:'Mi labor'},
-    {id:'programar', label:'Programar'},
-    {id:'historial', label:'Historial'}
-  ];
-
-  renderHeader();
-
-  let body = '';
-  if(currentTab === 'dashboard')      body = await renderJefeSiembraDashboard();
-  else if(currentTab === 'programar') body = await renderJefeProgramar();
-  else if(currentTab === 'historial') body = await renderJefeSiembraHistorial();
-
-  document.getElementById('appBody').innerHTML = renderTabs(tabs) + `<div class="sec active">${body}</div>`;
-}
-
-async function renderJefeSiembraDashboard(){
-  const hoy = hoyISO();
-
-  // Tareas de siembra/preparación programadas hoy (en todos los distritos)
-  const { data: progHoy } = await sb.from('avc_programacion')
-    .select('*')
-    .eq('fecha', hoy)
-    .eq('eliminada', false)
-    .in('codigo_actividad', CODIGOS_JEFE_SIEMBRA)
-    .order('hora_programada', { nullsFirst: false });
-
-  const todas = progHoy || [];
-  const total = todas.length;
-  const compl = todas.filter(p => p.estado === 'completada' || p.estado === 'modificada').length;
-  const enCurso = todas.filter(p => p.estado === 'en_curso' || p.estado === 'esperando_encargado' || p.estado === 'esperando_supervisor').length;
-  const haPlan = todas.reduce((s,p) => s + parseFloat(p.ha_plan || 0), 0);
-  const haReal = todas.reduce((s,p) => s + parseFloat(p.ha_real || 0), 0);
-  const cumpl = total > 0 ? Math.round((compl / total) * 100) : 0;
-
-  let html = `
-    <div class="banner">
-      <div class="banner-lbl">Siembra y Preparación · todos los distritos</div>
-      <div class="banner-txt">${total} tarea${total!==1?'s':''} programada${total!==1?'s':''} hoy</div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat"><div class="stat-lbl">Tareas</div><div class="stat-val">${total}</div></div>
-      <div class="stat"><div class="stat-lbl">HA hoy</div><div class="stat-val">${haReal.toFixed(1)}</div></div>
-      <div class="stat"><div class="stat-lbl">Cumpl.</div><div class="stat-val ${cumpl>=70?'ok':cumpl>=40?'warn':'danger'}">${cumpl}%</div></div>
-    </div>
-    <div class="sec-h"><span>Tareas de hoy</span><span style="font-weight:400;color:#9ca3af">${haReal.toFixed(1)} / ${haPlan.toFixed(1)} ha</span></div>
-  `;
-
-  if(total === 0){
-    html += '<div class="empty"><i class="ti ti-calendar-off"></i>Sin tareas de siembra ni preparación programadas hoy.</div>';
-  } else {
-    // Agrupar por distrito (a partir del lote)
-    const grupos = {};
-    todas.forEach(p => {
-      const lote = plantios.find(l => l.finca_lote === p.finca_lote);
-      const d = lote?.distrito || 'Sin distrito';
-      if(!grupos[d]) grupos[d] = [];
-      grupos[d].push({prog: p, lote});
-    });
-
-    Object.keys(grupos).sort().forEach(d => {
-      html += `<div class="sec-h" style="margin-top:14px"><span><i class="ti ti-map" style="font-size:11px;vertical-align:-1px;margin-right:3px"></i>${d}</span></div>`;
-      grupos[d].forEach(({prog: p, lote}) => {
-        const ico = iconoActividad(p.codigo_actividad);
-        const fincaNombre = lote?.descripcion_finca || p.finca_lote;
-        html += `<div class="tarea-card estado-${p.estado}" onclick="abrirTarea(${p.id})">
-          <div class="tarea-head">
-            <div class="tarea-left">
-              <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
-              <div class="tarea-info">
-                ${p.hora_programada ? `<div class="tarea-hora">${p.hora_programada}</div>` : ''}
-                <div class="tarea-title">${actNombre(p.codigo_actividad)}</div>
-              </div>
-            </div>
-            ${badge(p.estado)}
-          </div>
-          <div class="tarea-sub">${fincaNombre} · ${p.finca_lote}</div>
-          <div class="tarea-meta">Plan: ${p.ha_plan} ha${p.ha_real?` · Real: ${p.ha_real} ha`:''}${p.email_supervisor?` · ${p.email_supervisor.split('@')[0]}`:''}</div>
-        </div>`;
-      });
-    });
-  }
-
-  html += `<button class="btn btn-primary" style="margin-top:14px" onclick="setTab('programar')"><i class="ti ti-plus"></i>Programar nueva tarea</button>`;
-  return html;
-}
-
-async function renderJefeSiembraHistorial(){
-  // Tareas creadas por este jefe en los últimos 30 días
-  const desde = new Date();
-  desde.setDate(desde.getDate() - 30);
-  const desdeISO = desde.toISOString().split('T')[0];
-
-  const { data } = await sb.from('avc_programacion')
-    .select('*')
-    .eq('eliminada', false)
-    .in('codigo_actividad', CODIGOS_JEFE_SIEMBRA)
-    .gte('fecha', desdeISO)
-    .order('fecha', { ascending: false })
-    .limit(100);
-
-  const todas = data || [];
-  if(todas.length === 0) return '<div class="empty"><i class="ti ti-history"></i>Sin tareas programadas en los últimos 30 días.</div>';
-
-  let html = `<div class="sec-h">Últimos 30 días · ${todas.length} tarea${todas.length!==1?'s':''}</div>`;
-  todas.forEach(p => {
-    const lote = plantios.find(l => l.finca_lote === p.finca_lote);
-    const fincaNombre = lote?.descripcion_finca || p.finca_lote;
-    const ico = iconoActividad(p.codigo_actividad);
-    html += `<div class="tarea-card estado-${p.estado}" onclick="abrirTarea(${p.id})">
-      <div class="tarea-head">
-        <div class="tarea-left">
-          <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
-          <div class="tarea-info">
-            <div class="tarea-hora">${p.fecha}</div>
-            <div class="tarea-title">${actNombre(p.codigo_actividad)}</div>
-          </div>
-        </div>
-        ${badge(p.estado)}
-      </div>
-      <div class="tarea-sub">${fincaNombre} · ${p.finca_lote}</div>
-      <div class="tarea-meta">Plan: ${p.ha_plan} ha${p.ha_real?` · Real: ${p.ha_real} ha`:''}</div>
-    </div>`;
-  });
-  return html;
-}
-
 function encontrarDistritoDeJefe(nombre){
   for(const [d, info] of Object.entries(jerarquia)){
     if(info.jefe === nombre) return d;
@@ -1036,45 +891,31 @@ async function modalEncargado(nombre){
 }
 
 async function renderJefeProgramar(){
-  const esJefeSiembra = usuario.rol_avc === 'jefe_siembra';
+  const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
+  if(!distritoNombre) return '<div class="empty">No se encontró tu distrito.</div>';
+
+  const distrito = jerarquia[distritoNombre];
   const fechaDefault = hoyISO();
 
   // Listado de actividades programables (excluir fertirriegos que tienen flujo propio)
-  // Jefe de Distrito NO ve siembra ni preparación. Jefe de Siembra SOLO ve esas.
-  const actsProg = actividadesAll.filter(a => {
-    if(a.es_fertirriego) return false;
-    if(esJefeSiembra) return CODIGOS_JEFE_SIEMBRA.includes(a.codigo_actividad);
-    return !CODIGOS_JEFE_SIEMBRA.includes(a.codigo_actividad);
-  });
+  const actsProg = actividadesAll.filter(a => !a.es_fertirriego);
 
-  // Distrito(s) a recorrer: el Jefe de Siembra cubre todos, el Jefe de Distrito solo el suyo
-  let distritosARecorrer = [];
-  if(esJefeSiembra){
-    distritosARecorrer = Object.entries(jerarquia).map(([n,info]) => ({nombre:n, info}));
-  } else {
-    const distritoNombre = encontrarDistritoDeJefe(usuario.nombre_completo);
-    if(!distritoNombre) return '<div class="empty">No se encontró tu distrito.</div>';
-    distritosARecorrer = [{nombre: distritoNombre, info: jerarquia[distritoNombre]}];
-  }
-
-  // Lista plana de lotes + lista de fincas
+  // Lista plana de lotes del distrito + lista de fincas
   const todosLotes = [];
   const fincasMap = {}; // nombre -> {nombre, codigo}
-  distritosARecorrer.forEach(({info: distrito}) => {
-    distrito.encargados.forEach(e => {
-      e.fincas.forEach(f => {
-        if(!fincasMap[f.nombre]) fincasMap[f.nombre] = {nombre: f.nombre, codigo: f.codigo};
-        f.lotes.forEach(l => {
-          todosLotes.push({
-            finca_lote: f.codigo + l,
-            finca_nombre: f.nombre,
-            lote_num: l,
-            display: `${f.nombre} · Lote ${l}`,
-            tipo_riego: f.tipo_riego,
-            encargado_nombre: e.nombre,
-            encargado_email: e.email,
-            area_ha: (plantios.find(p => p.finca_lote === f.codigo + l) || {}).area_ha
-          });
+  distrito.encargados.forEach(e => {
+    e.fincas.forEach(f => {
+      if(!fincasMap[f.nombre]) fincasMap[f.nombre] = {nombre: f.nombre, codigo: f.codigo};
+      f.lotes.forEach(l => {
+        todosLotes.push({
+          finca_lote: f.codigo + l,
+          finca_nombre: f.nombre,
+          lote_num: l,
+          display: `${f.nombre} · Lote ${l}`,
+          tipo_riego: f.tipo_riego,
+          encargado_nombre: e.nombre,
+          encargado_email: e.email,
+          area_ha: (plantios.find(p => p.finca_lote === f.codigo + l) || {}).area_ha
         });
       });
     });
@@ -1702,7 +1543,6 @@ async function validarAreaPlan(){
   const disponible = area - acumPlan;
   const excede = ha > disponible;
   const cuantasPrevias = (data || []).length;
-  const permiteExceder = CODIGOS_EXCEDE_AREA.includes(cod);
 
   let bg = '#E1F5EE', color = '#0F6E56', icon = 'ti-circle-check';
   let msg = '';
@@ -1713,12 +1553,6 @@ async function validarAreaPlan(){
   } else if(ha <= 0){
     bg = '#FAF5EE'; color = '#854F0B'; icon = 'ti-info-circle';
     msg = `<i class="ti ${icon}"></i> Lote ${area} ha · ${cuantasPrevias} tarea${cuantasPrevias!==1?'s':''} previa${cuantasPrevias!==1?'s':''} (${acumPlan.toFixed(2)} ha) · disponible <strong>${disponible.toFixed(2)} ha</strong>`;
-  } else if(excede && permiteExceder){
-    // En siembra/preparación se trabajan callejones, rondas y bordes que no están en el polígono.
-    // Se permite exceder, solo aviso amarillo.
-    bg = '#FEF3C7'; color = '#854F0B'; icon = 'ti-alert-triangle';
-    const exceso = ha - disponible;
-    msg = `<i class="ti ${icon}"></i> <strong>Avance excede el área del lote</strong> en ${exceso.toFixed(2)} ha. Lote ${area} ha · planificado ${acumPlan.toFixed(2)} ha · esta tarea ${ha.toFixed(2)} ha. Permitido en siembra y preparación (callejones, bordes, rondas).`;
   } else if(excede){
     bg = '#FCE9E9'; color = '#A32D2D'; icon = 'ti-alert-triangle';
     msg = `<i class="ti ${icon}"></i> <strong>Excede el área disponible</strong>. Lote ${area} ha · ya planificado ${acumPlan.toFixed(2)} ha · estás intentando ${ha.toFixed(2)} ha · máximo permitido <strong>${disponible.toFixed(2)} ha</strong>`;
@@ -1734,14 +1568,12 @@ async function validarAreaPlan(){
   info.style.display = 'block';
 
   // Marcar estado de validación de área
-  // Si la actividad permite exceder, nunca queda como "no ok"
-  const areaOk = !excede || permiteExceder;
-  haInput.setAttribute('data-area-ok', areaOk ? '1' : '0');
+  haInput.setAttribute('data-area-ok', excede ? '0' : '1');
 
-  // Bloquear el botón si excede (sólo si no hay otro bloqueo activo y la actividad NO permite exceder)
+  // Bloquear el botón si excede (sólo si no hay otro bloqueo activo)
   if(btnProg){
     const bloqueadoAsignacion = box && box.getAttribute('data-bloqueado') === '1';
-    btnProg.disabled = bloqueadoAsignacion || (excede && !permiteExceder);
+    btnProg.disabled = bloqueadoAsignacion || excede;
   }
 }
 
@@ -1794,11 +1626,9 @@ async function guardarProgramacion(){
       if(ha_plan <= 0) throw new Error('Indica HA proyectadas');
       
       // Validación final de área (server-side check para evitar carreras)
-      // Excepción: SIEMBRA y PREPARACIÓN pueden exceder el área del lote (callejones, bordes, rondas)
       const loteOpt = document.getElementById('progLote').options[document.getElementById('progLote').selectedIndex];
       const area = parseFloat(loteOpt.getAttribute('data-area') || 0);
-      const permiteExceder = CODIGOS_EXCEDE_AREA.includes(codigo_actividad);
-      if(area > 0 && !permiteExceder){
+      if(area > 0){
         const { data: previas } = await sb.from('avc_programacion')
           .select('ha_plan')
           .eq('finca_lote', finca_lote)
@@ -2216,15 +2046,8 @@ function renderTareaDetalle(t, regs){
       // No compartida, no hay registro aún → puedo registrar
       acciones = `<button class="btn btn-primary" onclick="capturarTareaUnica(${t.id})">Registrar avance</button>`;
     }
-  } else if(usuario.rol_avc === 'supervisor_actividad'){
-    // Modelo COMPARTIDA o EXTERNA: el supervisor abre la operación y el encargado aporta su parte
-    if(compartida && !parteSup){
-      acciones = `<button class="btn btn-primary" onclick="capturarParteSupervisor(${t.id})">Abrir operación</button>`;
-    }
-    // Modelo SUPERVISOR puro (ej. SIEMBRA, PREPARACIÓN): el supervisor es el único ejecutor
-    else if(!compartida && !parteUnica && (t.estado === 'planificado' || t.estado === 'pendiente' || t.estado === 'en_curso')){
-      acciones = `<button class="btn btn-primary" onclick="capturarTareaUnica(${t.id})">Registrar avance</button>`;
-    }
+  } else if(usuario.rol_avc === 'supervisor_actividad' && compartida && !parteSup){
+    acciones = `<button class="btn btn-primary" onclick="capturarParteSupervisor(${t.id})">Abrir operación</button>`;
   }
 
   return `
@@ -3060,9 +2883,31 @@ async function crearNotificacion({destinatario, tipo, titulo, mensaje, prog_id})
       prog_id: prog_id || null,
       creada_por: usuario?.email || null
     });
+    
+    // ENVÍO DE PUSH NOTIFICATION (no bloquea el flujo si falla)
+    // Llama a la Edge Function 'enviar-push' que despacha al celular
+    enviarPushAsync(destinatario, titulo, mensaje, prog_id);
   } catch(err){
     console.error('Error creando notificación:', err);
     // No bloqueamos el flujo principal si la notificación falla
+  }
+}
+
+// Llamada fire-and-forget a Edge Function (no esperamos respuesta)
+async function enviarPushAsync(destinatario, titulo, mensaje, prog_id){
+  try {
+    const { error } = await sb.functions.invoke('enviar-push', {
+      body: {
+        destinatario,
+        titulo,
+        mensaje: mensaje || '',
+        url: './app.html',
+        prog_id: prog_id || null
+      }
+    });
+    if(error) console.warn('[Push] Edge Function falló:', error);
+  } catch(err){
+    console.warn('[Push] No se pudo invocar Edge Function:', err);
   }
 }
 
@@ -3341,6 +3186,173 @@ window.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add('pwa-installed');
   }
 });
+
+/* ============================================================
+   PUSH NOTIFICATIONS - Fase 2C
+   ============================================================ */
+
+// Clave VAPID pública (Public Key generada con vapidkeys.com)
+const VAPID_PUBLIC_KEY = 'BMnntyPyuZhiT2KzJGuxmidzIL8LxbAKK6YzqoA671riZAjCPaz6TdnmmlrG3Y5b7gf0QOas6jfdoBkZcxpRxJM';
+
+// Helper: convertir Public Key base64-url a Uint8Array
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+// Estado actual del permiso de notificaciones
+function pushSoportado() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function estadoPushPermiso() {
+  if (!pushSoportado()) return 'no-soportado';
+  return Notification.permission;  // 'default', 'granted', 'denied'
+}
+
+// Pedir permiso y suscribir el celular al servicio de push
+async function activarPushNotifications() {
+  if (!pushSoportado()) {
+    toast('Tu navegador no soporta notificaciones push', 'error');
+    return false;
+  }
+  
+  if (!usuario || !usuario.email) {
+    toast('Necesitas estar logueado', 'error');
+    return false;
+  }
+  
+  try {
+    // 1. Pedir permiso al usuario
+    const permiso = await Notification.requestPermission();
+    if (permiso !== 'granted') {
+      toast('Activa las notificaciones en la configuración del navegador', 'error');
+      return false;
+    }
+    
+    // 2. Esperar a que el Service Worker esté listo
+    const registration = await navigator.serviceWorker.ready;
+    
+    // 3. Verificar si ya hay una suscripción
+    let subscription = await registration.pushManager.getSubscription();
+    
+    if (!subscription) {
+      // 4. Crear suscripción nueva
+      const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey
+      });
+    }
+    
+    // 5. Guardar en BD (sb es el cliente Supabase)
+    const subData = subscription.toJSON();
+    
+    // Verificar si ya existe esta suscripción en BD
+    const { data: existente } = await sb.from('avc_push_subs')
+      .select('id')
+      .eq('endpoint', subData.endpoint)
+      .maybeSingle();
+    
+    if (existente) {
+      // Actualizar email por si cambió de usuario en el mismo celular
+      await sb.from('avc_push_subs')
+        .update({
+          email: usuario.email,
+          ultima_uso: new Date().toISOString()
+        })
+        .eq('id', existente.id);
+    } else {
+      // Crear nueva
+      await sb.from('avc_push_subs').insert({
+        email: usuario.email,
+        endpoint: subData.endpoint,
+        p256dh_key: subData.keys.p256dh,
+        auth_key: subData.keys.auth,
+        user_agent: navigator.userAgent.substring(0, 200)
+      });
+    }
+    
+    console.log('[Push] Suscripción registrada en BD');
+    toast('Notificaciones activadas ✓', 'success');
+    localStorage.setItem('push_activado', '1');
+    actualizarUIPush();
+    return true;
+    
+  } catch (err) {
+    console.error('[Push] Error activando push:', err);
+    toast('Error: ' + err.message, 'error');
+    return false;
+  }
+}
+
+// Desactivar push (borrar suscripción)
+async function desactivarPushNotifications() {
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    
+    if (subscription) {
+      // Borrar de BD primero
+      await sb.from('avc_push_subs')
+        .delete()
+        .eq('endpoint', subscription.endpoint);
+      
+      // Cancelar suscripción del navegador
+      await subscription.unsubscribe();
+    }
+    
+    localStorage.setItem('push_activado', '0');
+    toast('Notificaciones desactivadas', 'info');
+    actualizarUIPush();
+  } catch (err) {
+    console.error('[Push] Error desactivando:', err);
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+// Mostrar banner sutil "Activar notificaciones" para usuarios nuevos
+function maybeShowPushBanner() {
+  if (!usuario) return;
+  if (!pushSoportado()) return;
+  if (estadoPushPermiso() === 'granted' && localStorage.getItem('push_activado') === '1') return;
+  if (localStorage.getItem('push_banner_rechazado') === '1') return;
+  
+  // Mostrar después de 8 segundos (no apenas entran)
+  setTimeout(() => {
+    if (document.getElementById('pushBanner')) return;
+    
+    const banner = document.createElement('div');
+    banner.id = 'pushBanner';
+    banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1D9E75;color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;z-index:9998;box-shadow:0 -4px 16px rgba(0,0,0,0.15);font-size:13px';
+    banner.innerHTML = `
+      <i class="ti ti-bell" style="font-size:22px;flex-shrink:0"></i>
+      <div style="flex:1">
+        <div style="font-weight:600;margin-bottom:2px">Activar notificaciones</div>
+        <div style="font-size:11px;opacity:0.9">Recibí avisos cuando te asignen tareas, incluso con la app cerrada</div>
+      </div>
+      <button onclick="activarPushNotifications().then(()=>document.getElementById('pushBanner')?.remove())" style="background:white;color:#0F6E56;border:none;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer">Activar</button>
+      <button onclick="rechazarPushBanner()" style="background:transparent;border:none;color:white;padding:6px;font-size:18px;cursor:pointer;line-height:1"><i class="ti ti-x"></i></button>
+    `;
+    document.body.appendChild(banner);
+  }, 8000);
+}
+
+function rechazarPushBanner() {
+  localStorage.setItem('push_banner_rechazado', '1');
+  document.getElementById('pushBanner')?.remove();
+}
+
+function actualizarUIPush() {
+  // Si hay botón de notif en header, refrescarlo (futuro)
+}
+
+// Cuando el usuario está logueado, intentar mostrar banner de push
+window.addEventListener('csia-usuario-listo', maybeShowPushBanner);
 </script>
 </body>
 </html>

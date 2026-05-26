@@ -1,9 +1,7 @@
 // Service Worker para CSIA Campo
-// Versión inicial - Solo cache offline. Push se agrega en Sub-fase 2C.
-// IMPORTANTE: este SW vive en /CSIA_CAMPO/service-worker.js
-// y solo controla esa subcarpeta, no la raíz del dominio reinaldobacila.github.io
+// Sub-fase 2C: push notifications reales
 
-const CACHE_VERSION = 'csia-campo-v1';
+const CACHE_VERSION = 'csia-campo-v2';
 // Rutas relativas: el navegador las resuelve respecto al scope del SW
 const CACHE_FILES = [
   './',
@@ -18,7 +16,6 @@ self.addEventListener('install', (event) => {
   console.log('[SW] Instalando versión', CACHE_VERSION);
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) => {
-      // Cachear archivos clave, ignorando errores individuales (algunos pueden no existir)
       return Promise.allSettled(
         CACHE_FILES.map((url) => cache.add(url).catch((err) => {
           console.warn('[SW] No se pudo cachear', url, err);
@@ -26,7 +23,6 @@ self.addEventListener('install', (event) => {
       );
     })
   );
-  // Activar este SW inmediatamente, sin esperar a que se cierren las pestañas viejas
   self.skipWaiting();
 });
 
@@ -35,38 +31,27 @@ self.addEventListener('activate', (event) => {
   console.log('[SW] Activando versión', CACHE_VERSION);
   event.waitUntil(
     Promise.all([
-      // Borrar caches viejos
       caches.keys().then((keys) => {
         return Promise.all(
           keys
             .filter((key) => key !== CACHE_VERSION)
-            .map((key) => {
-              console.log('[SW] Borrando cache viejo:', key);
-              return caches.delete(key);
-            })
+            .map((key) => caches.delete(key))
         );
       }),
-      // Tomar control de las pestañas abiertas inmediatamente
       self.clients.claim(),
     ])
   );
 });
 
-// === FETCH: estrategia network-first con fallback a cache ===
+// === FETCH: network-first con fallback a cache ===
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  
-  // Solo manejar GET de mismo origen (HTML, JS, CSS)
-  // Las requests a Supabase (cross-origin) pasan directo a la red
   if (event.request.method !== 'GET') return;
   if (url.origin !== location.origin) return;
   
-  // No cachear el archivo app.html dinámico — siempre intentar red primero
-  // para que los cambios lleguen rápido
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Si la respuesta es válida, actualizar el cache
         if (response.status === 200) {
           const responseClone = response.clone();
           caches.open(CACHE_VERSION).then((cache) => {
@@ -76,35 +61,90 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => {
-        // Si no hay red, servir del cache
         return caches.match(event.request).then((cachedResponse) => {
           if (cachedResponse) return cachedResponse;
-          // Si tampoco está en cache y es una navegación, devolver app.html como fallback
           if (event.request.mode === 'navigate') {
             return caches.match('./app.html');
           }
-          // Sino, fallar limpio
           return new Response('Offline y sin cache', { status: 503 });
         });
       })
   );
 });
 
-// === PUSH NOTIFICATIONS (vendrá en Sub-fase 2C) ===
-// Placeholder por ahora. En 2C esto recibirá push del servidor y mostrará la notificación nativa.
+// === PUSH NOTIFICATIONS ===
+// El servidor (Edge Function) envía un push con este formato:
+// {
+//   "title": "Nueva tarea asignada",
+//   "body": "ACARRILEO en JCS1 · 3 ha",
+//   "url": "./app.html",
+//   "tag": "notif-123",
+//   "data": { "prog_id": 42 }
+// }
+
 self.addEventListener('push', (event) => {
-  console.log('[SW] Push recibido (no implementado todavía)', event);
+  console.log('[SW] Push recibido');
+  
+  let payload = {
+    title: 'CSIA Campo',
+    body: 'Tenés una nueva notificación',
+    url: './app.html',
+    tag: 'csia-default'
+  };
+  
+  // Parsear el contenido del push (JSON)
+  if (event.data) {
+    try {
+      payload = { ...payload, ...event.data.json() };
+    } catch (e) {
+      console.warn('[SW] Push sin JSON, usando defaults', e);
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+  
+  const options = {
+    body: payload.body,
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    tag: payload.tag,                    // agrupa notifs con mismo tag
+    renotify: true,                      // suena aunque haya otras con el mismo tag
+    requireInteraction: false,           // se cierra sola
+    vibrate: [200, 100, 200],            // patrón de vibración Android
+    data: {
+      url: payload.url || './app.html',
+      ...payload.data
+    },
+    actions: [
+      { action: 'open', title: 'Abrir' },
+      { action: 'dismiss', title: 'Cerrar' }
+    ]
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(payload.title, options)
+  );
 });
 
+// === CLICK EN NOTIFICACIÓN ===
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  // En 2C: abrir CSIA Campo en la URL relevante
+  
+  // Si tocaron "Cerrar", no abrir nada
+  if (event.action === 'dismiss') return;
+  
+  const targetUrl = event.notification.data?.url || './app.html';
+  
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      if (clientList.length > 0) {
-        return clientList[0].focus();
+      // Si la app ya está abierta en alguna pestaña, enfocarla
+      for (const client of clientList) {
+        if (client.url.includes('/CSIA_CAMPO/') && 'focus' in client) {
+          client.navigate(targetUrl).catch(() => {});
+          return client.focus();
+        }
       }
-      return self.clients.openWindow('./app.html');
+      // Si no está abierta, abrir nueva pestaña
+      return self.clients.openWindow(targetUrl);
     })
   );
 });
