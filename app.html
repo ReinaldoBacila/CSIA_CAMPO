@@ -3237,22 +3237,40 @@ async function activarPushNotifications() {
     // 2. Esperar a que el Service Worker esté listo
     const registration = await navigator.serviceWorker.ready;
     
-    // 3. Verificar si ya hay una suscripción
-    let subscription = await registration.pushManager.getSubscription();
-    
-    if (!subscription) {
-      // 4. Crear suscripción nueva
-      const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey
-      });
+    // 3. Si hay suscripción previa (de otro usuario en el mismo celular), darse de baja
+    // Esto fuerza generar un endpoint nuevo y limpio
+    const subscriptionPrevia = await registration.pushManager.getSubscription();
+    if (subscriptionPrevia) {
+      // Borrar de BD primero (esta suscripción puede haber sido de otro usuario)
+      await sb.from('avc_push_subs')
+        .delete()
+        .eq('endpoint', subscriptionPrevia.endpoint);
+      // Cancelar del navegador
+      await subscriptionPrevia.unsubscribe();
     }
+    
+    // 4. Crear suscripción nueva limpia
+    const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey
+    });
     
     // 5. Guardar en BD (sb es el cliente Supabase)
     const subData = subscription.toJSON();
     
-    // Verificar si ya existe esta suscripción en BD
+    // Limpiar cualquier suscripción HUÉRFANA del mismo email pero endpoint distinto
+    // (caso: el mismo usuario reinstaló la PWA en este mismo celular)
+    // Para esto detectamos por user-agent: si hay otra fila con mismo email y mismo user_agent
+    // pero distinto endpoint, es huérfana porque el navegador solo escucha 1 endpoint por device.
+    const userAgent = navigator.userAgent.substring(0, 200);
+    await sb.from('avc_push_subs')
+      .delete()
+      .eq('email', usuario.email)
+      .eq('user_agent', userAgent)
+      .neq('endpoint', subData.endpoint);
+    
+    // Verificar si esta exacta suscripción ya existe (raro, pero por las dudas)
     const { data: existente } = await sb.from('avc_push_subs')
       .select('id')
       .eq('endpoint', subData.endpoint)
@@ -3351,8 +3369,56 @@ function actualizarUIPush() {
   // Si hay botón de notif en header, refrescarlo (futuro)
 }
 
+// Al hacer login, si ya hay suscripción push activa, reasignarla al usuario actual
+// Esto evita el bug donde un cel con varios logins envía push al usuario equivocado
+async function reasignarPushAlUsuarioActual() {
+  if (!pushSoportado() || !usuario?.email) return;
+  if (estadoPushPermiso() !== 'granted') return;
+  
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    
+    const endpoint = subscription.endpoint;
+    const userAgent = navigator.userAgent.substring(0, 200);
+    
+    // Buscar la fila por endpoint
+    const { data: existente } = await sb.from('avc_push_subs')
+      .select('id, email')
+      .eq('endpoint', endpoint)
+      .maybeSingle();
+    
+    if (existente && existente.email !== usuario.email) {
+      // El endpoint estaba registrado a otro email → cambiar al actual
+      await sb.from('avc_push_subs')
+        .update({ email: usuario.email, ultima_uso: new Date().toISOString() })
+        .eq('id', existente.id);
+      console.log('[Push] Reasignada suscripción de', existente.email, 'a', usuario.email);
+    } else if (existente) {
+      // Mismo usuario, solo actualizar ultima_uso
+      await sb.from('avc_push_subs')
+        .update({ ultima_uso: new Date().toISOString() })
+        .eq('id', existente.id);
+    }
+    
+    // Limpiar suscripciones huérfanas del mismo email en este mismo dispositivo
+    await sb.from('avc_push_subs')
+      .delete()
+      .eq('email', usuario.email)
+      .eq('user_agent', userAgent)
+      .neq('endpoint', endpoint);
+      
+  } catch (err) {
+    console.warn('[Push] Error reasignando suscripción:', err);
+  }
+}
+
 // Cuando el usuario está logueado, intentar mostrar banner de push
-window.addEventListener('csia-usuario-listo', maybeShowPushBanner);
+window.addEventListener('csia-usuario-listo', () => {
+  reasignarPushAlUsuarioActual();
+  maybeShowPushBanner();
+});
 </script>
 </body>
 </html>
