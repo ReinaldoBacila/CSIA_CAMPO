@@ -390,6 +390,7 @@ let usuario = null;          // perfil del usuario logueado
 let plantios = [];           // todos los lotes accesibles (filtrados por permisos)
 let actividadesPerm = [];    // actividades que el usuario puede capturar
 let actividadesAll = [];     // catálogo completo de actividades (para nombres)
+let procesosAll = [];        // catálogo de procesos (macroproceso, proceso, nombre)
 let jerarquia = {};          // { 'DISTRITO N': { jefe, encargados:[{nombre, email, fincas:[{codigo,nombre,lotes,tipo_riego}]}] } }
 let currentTab = '';
 let currentDetailId = null;
@@ -439,6 +440,221 @@ function badge(estado){
 function actNombre(codigo){
   const a = actividadesAll.find(x => x.codigo_actividad === codigo);
   return a ? a.nombre_actividad : 'Actividad ' + codigo;
+}
+
+// ============================================================
+// HISTORIAL EXPANDIBLE: ver datos de un registro en modo lectura
+// ============================================================
+async function mostrarDetalleHistorial(tabla, id){
+  // Mapa de tablas a su query con joins
+  const queries = {
+    'humedad': () => sb.from('avc_riego_humedad').select('*').eq('id', id).maybeSingle(),
+    'caudales': () => sb.from('avc_riego_caudales').select('*, pm_fuentes_agua(nombre, tipo, unidad)').eq('id', id).maybeSingle(),
+    'gravedad': () => sb.from('avc_riego_gravedad').select('*').eq('id', id).maybeSingle(),
+    'drenajes': () => sb.from('avc_riego_drenajes').select('*, pm_tipos_drenaje(nombre, es_mecanizado), pm_tipos_maquinaria_drenaje(nombre), pm_actividades_drenaje(nombre)').eq('id', id).maybeSingle(),
+    'pivote': () => sb.from('avc_riego_pivote').select('*').eq('id', id).maybeSingle(),
+    'aspersion': () => sb.from('avc_riego_aspersion').select('*').eq('id', id).maybeSingle(),
+    'goteo': () => sb.from('avc_riego_goteo').select('*, pm_estaciones_riego(nombre), pm_tipos_riego_goteo(nombre)').eq('id', id).maybeSingle(),
+    'reparacion_goteo': () => sb.from('avc_riego_reparacion_goteo').select('*').eq('id', id).maybeSingle()
+  };
+
+  const qFn = queries[tabla];
+  if(!qFn){ toast('Tipo de registro no reconocido', 'error'); return; }
+
+  const { data: r, error } = await qFn();
+  if(error || !r){ toast('No se pudo cargar el detalle', 'error'); return; }
+
+  // Cargar tiempos perdidos si aplica
+  let tiemposPerdidos = [];
+  if(tabla === 'aspersion' || tabla === 'goteo'){
+    const { data: tps } = await sb.from('avc_riego_tiempo_perdido')
+      .select('*, pm_causas_tiempo_perdido(nombre)')
+      .eq('tipo_riego', tabla)
+      .eq('riego_id', id);
+    tiemposPerdidos = tps || [];
+  }
+
+  // Cargar materiales si es reparación
+  let materiales = [];
+  if(tabla === 'reparacion_goteo'){
+    const { data: mats } = await sb.from('avc_riego_reparacion_materiales')
+      .select('*, pm_materiales_reparacion_goteo(nombre, unidad)')
+      .eq('reparacion_id', id);
+    materiales = mats || [];
+  }
+
+  modalContent = construirDetalleHTML(tabla, r, tiemposPerdidos, materiales);
+  showModal();
+}
+
+function detalleCampo(label, valor, unidad){
+  if(valor == null || valor === '') return '';
+  const u = unidad ? ` <span style="color:#9CA3AF;font-weight:400">${unidad}</span>` : '';
+  return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F3F4F6">
+    <span style="color:#6b7280;font-size:12px">${label}</span>
+    <span style="font-weight:500;font-size:13px">${valor}${u}</span>
+  </div>`;
+}
+
+function construirDetalleHTML(tabla, r, tiemposPerdidos, materiales){
+  const titulos = {
+    'humedad':         'Medición de humedad',
+    'caudales':        'Medición de caudales',
+    'gravedad':        'Riego por gravedad',
+    'drenajes':        'Drenaje',
+    'pivote':          'Riego por pivote',
+    'aspersion':       'Riego por aspersión',
+    'goteo':           'Riego por goteo',
+    'reparacion_goteo':'Reparación de goteo'
+  };
+
+  let header = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>${titulos[tabla] || 'Detalle'}</h2>
+    <div style="background:#F3F4F6;color:#374151;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;display:inline-block;margin-bottom:14px">
+      <i class="ti ti-eye"></i> Vista de solo lectura
+    </div>
+  `;
+
+  let cuerpo = '<div style="display:flex;flex-direction:column">';
+
+  // Campos comunes
+  cuerpo += detalleCampo('Fecha', fmtFecha(r.fecha || r.fecha_inicio));
+  if(r.fecha_fin && r.fecha_fin !== r.fecha_inicio) cuerpo += detalleCampo('Fecha fin', fmtFecha(r.fecha_fin));
+  if(r.hora_inicio) cuerpo += detalleCampo('Hora inicio', r.hora_inicio.substring(0,5));
+  if(r.hora_medicion) cuerpo += detalleCampo('Hora medición', r.hora_medicion.substring(0,5));
+  if(r.hora) cuerpo += detalleCampo('Hora', r.hora.substring(0,5));
+  if(r.hora_fin) cuerpo += detalleCampo('Hora fin', r.hora_fin.substring(0,5));
+  if(r.finca) cuerpo += detalleCampo('Finca', r.finca);
+  if(r.lote != null) cuerpo += detalleCampo('Lote', r.lote);
+  if(r.lote_o_turno) cuerpo += detalleCampo('Lote / Turno', r.lote_o_turno);
+  if(r.turno) cuerpo += detalleCampo('Turno', 'TURNO ' + r.turno);
+
+  // Campos específicos por tabla
+  if(tabla === 'humedad'){
+    if(r.tipo_medicion === 'EMPIRICA'){
+      const map = {MARCHITEZ:'Marchitez (bajo)', CAPACIDAD_CAMPO:'Capacidad campo (óptimo)', SATURADO:'Saturado (alto)'};
+      cuerpo += detalleCampo('Tipo', 'Empírica / Calicata');
+      cuerpo += detalleCampo('Estado del suelo', map[r.empirica_estado] || r.empirica_estado);
+    } else {
+      cuerpo += detalleCampo('Tipo', 'Tensiómetros');
+      cuerpo += detalleCampo('Tens. 20 cm', r.tens_20cm, 'cb');
+      cuerpo += detalleCampo('Tens. 40 cm', r.tens_40cm, 'cb');
+    }
+  }
+
+  if(tabla === 'caudales'){
+    const f = r.pm_fuentes_agua || {};
+    cuerpo += detalleCampo('Fuente', f.nombre);
+    cuerpo += detalleCampo('Tipo de fuente', f.tipo === 'rio' ? 'Río' : f.tipo === 'canal' ? 'Canal' : f.tipo === 'laguna' ? 'Laguna' : '');
+    cuerpo += detalleCampo('Valor medido', r.valor_medido, r.unidad === 'metros_cubicos' ? 'm³' : 'gal/min');
+  }
+
+  if(tabla === 'gravedad'){
+    cuerpo += detalleCampo('HA regadas', r.ha_regadas, 'ha');
+    cuerpo += detalleCampo('Personal', r.personal);
+    cuerpo += detalleCampo('Tiempo de agua en el lote', r.tiempo_agua_lote, 'h');
+  }
+
+  if(tabla === 'drenajes'){
+    const tipo = r.pm_tipos_drenaje || {};
+    const maq = r.pm_tipos_maquinaria_drenaje || {};
+    const act = r.pm_actividades_drenaje || {};
+    cuerpo += detalleCampo('Tipo de drenaje', tipo.nombre);
+    cuerpo += detalleCampo('Actividad', act.nombre);
+    cuerpo += detalleCampo('Metros de avance', r.metros_avance, 'mts');
+    if(tipo.es_mecanizado){
+      cuerpo += detalleCampo('Maquinaria', maq.nombre);
+      cuerpo += detalleCampo('Propio / Alquilado', r.propio_alquilado);
+      cuerpo += detalleCampo('Horómetro inicio', r.horometro_ini);
+      cuerpo += detalleCampo('Horómetro fin', r.horometro_fin);
+    }
+  }
+
+  if(tabla === 'pivote'){
+    const tamMap = {pequeno:'Pequeño', mediano:'Mediano', grande:'Grande'};
+    cuerpo += detalleCampo('Bomba', r.codigo_bomba);
+    cuerpo += detalleCampo('Tipo operación', r.tipo_pivote_op);
+    cuerpo += detalleCampo('Tamaño pivote', tamMap[r.tipo_pivote_tam] || r.tipo_pivote_tam);
+    cuerpo += detalleCampo('Horómetro inicio', r.horometro_ini);
+    cuerpo += detalleCampo('Horómetro fin', r.horometro_fin);
+    cuerpo += detalleCampo('Número vueltas', r.numero_vueltas);
+    cuerpo += detalleCampo('% trabajo', r.pct_trabajo, '%');
+    cuerpo += detalleCampo('HA regadas', r.ha_regadas, 'ha');
+  }
+
+  if(tabla === 'aspersion'){
+    cuerpo += detalleCampo('HA regadas', r.ha_regadas, 'ha');
+    cuerpo += detalleCampo('Personal', r.cant_personas);
+    cuerpo += detalleCampo('Bomba', r.codigo_bomba);
+    cuerpo += detalleCampo('Energía', r.energia);
+    cuerpo += detalleCampo('Horómetro inicio', r.horometro_ini);
+    cuerpo += detalleCampo('Horómetro fin', r.horometro_fin);
+    cuerpo += detalleCampo('Horas programadas', r.horas_programadas, 'h');
+    cuerpo += detalleCampo('% cumplimiento', r.pct_cumplimiento, '%');
+    cuerpo += detalleCampo('N° riego', r.numero_riego);
+    cuerpo += detalleCampo('N° cambios', r.numero_cambios);
+    cuerpo += detalleCampo('N° aspersores', r.numero_aspersores);
+    cuerpo += detalleCampo('RPM', r.rpm);
+  }
+
+  if(tabla === 'goteo'){
+    const est = r.pm_estaciones_riego || {};
+    const tipo = r.pm_tipos_riego_goteo || {};
+    cuerpo += detalleCampo('Estación', est.nombre);
+    cuerpo += detalleCampo('Tipo de riego', tipo.nombre);
+    cuerpo += detalleCampo('Bomba', r.codigo_bomba);
+    cuerpo += detalleCampo('Energía', r.energia);
+    cuerpo += detalleCampo('Horas solicitadas', r.horas_solicitadas, 'h');
+    cuerpo += detalleCampo('Horómetro ini/fin', (r.horometro_ini != null ? r.horometro_ini : '—') + ' / ' + (r.horometro_fin != null ? r.horometro_fin : '—'));
+    cuerpo += detalleCampo('KW ini/fin', (r.kw_ini != null ? r.kw_ini : '—') + ' / ' + (r.kw_fin != null ? r.kw_fin : '—'));
+    cuerpo += detalleCampo('Presión ent/sal', (r.presion_entrada != null ? r.presion_entrada : '—') + ' / ' + (r.presion_salida != null ? r.presion_salida : '—'));
+    cuerpo += detalleCampo('Caudal ini/fin', (r.caudal_ini != null ? r.caudal_ini : '—') + ' / ' + (r.caudal_fin != null ? r.caudal_fin : '—'));
+    cuerpo += detalleCampo('Producto aplicado', r.producto_aplicado);
+  }
+
+  if(tabla === 'reparacion_goteo'){
+    cuerpo += detalleCampo('Avance', r.avance_ha, 'ha');
+    cuerpo += detalleCampo('Personal', r.personal);
+  }
+
+  cuerpo += '</div>';
+
+  // Tiempos perdidos
+  if(tiemposPerdidos && tiemposPerdidos.length > 0){
+    cuerpo += '<div style="margin-top:14px;background:#FEF3F2;border-left:3px solid #F87171;padding:10px 12px;border-radius:0 6px 6px 0">';
+    cuerpo += '<div style="font-size:11px;font-weight:600;color:#7F1D1D;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px"><i class="ti ti-clock-pause"></i> Tiempo perdido</div>';
+    tiemposPerdidos.forEach(tp => {
+      const causa = (tp.pm_causas_tiempo_perdido && tp.pm_causas_tiempo_perdido.nombre) || 'Causa';
+      cuerpo += `<div style="font-size:12px;padding:4px 0">• ${causa}: <strong>${tp.minutos} min</strong>${tp.observaciones ? ' — '+tp.observaciones : ''}</div>`;
+    });
+    cuerpo += '</div>';
+  }
+
+  // Materiales reparación
+  if(materiales && materiales.length > 0){
+    cuerpo += '<div style="margin-top:14px;background:#F0F9FF;border-left:3px solid #38BDF8;padding:10px 12px;border-radius:0 6px 6px 0">';
+    cuerpo += '<div style="font-size:11px;font-weight:600;color:#075985;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px"><i class="ti ti-tools"></i> Materiales utilizados</div>';
+    materiales.forEach(m => {
+      const mat = (m.pm_materiales_reparacion_goteo && m.pm_materiales_reparacion_goteo.nombre) || 'Material';
+      const unidad = (m.pm_materiales_reparacion_goteo && m.pm_materiales_reparacion_goteo.unidad) || '';
+      cuerpo += `<div style="font-size:12px;padding:4px 0">• ${mat}: <strong>${m.cantidad}</strong> ${unidad}</div>`;
+    });
+    cuerpo += '</div>';
+  }
+
+  // Observaciones
+  if(r.observaciones){
+    cuerpo += `<div style="margin-top:14px;background:#F9FAFB;border-radius:6px;padding:10px;font-size:12px;color:#374151;font-style:italic">"${r.observaciones}"</div>`;
+  }
+
+  // Footer
+  cuerpo += `<div style="margin-top:14px;padding-top:10px;border-top:1px solid #E5E7EB;font-size:11px;color:#9CA3AF">
+    Registrado por ${r.registrado_por}<br>
+    ${r.creado_en ? fmtFecha(r.creado_en.substring(0,10)) + ' · ' + r.creado_en.substring(11,16) : ''}
+  </div>`;
+
+  return header + cuerpo;
 }
 
 function esCompartida(codigo){
@@ -551,6 +767,10 @@ async function cargarMaestros(){
   const { data: acts } = await sb.from('avc_actividades').select('*').eq('activa', true).order('codigo_actividad');
   actividadesAll = acts || [];
 
+  // 1.b Catálogo de procesos (para el selector previo del jefe)
+  const { data: procs } = await sb.from('avc_procesos').select('*').order('codigo_macroproceso').order('codigo_proceso');
+  procesosAll = procs || [];
+
   // 2. Plantíos (lotes) - filtrados por permisos si es usuario regular
   const esAdmin = usuario.rol_avc === 'admin' || usuario.rol_avc === 'programador';
   let queryP = sb.from('maestro_plantios').select('finca_lote, finca, descripcion_finca, area_ha, variedad, tipo_riego, jefe_distrito, encargado_finca, distrito');
@@ -640,6 +860,9 @@ function routerPorRol(){
   if(usuario.rol_avc === 'jefe_distrito')           renderJefe();
   else if(usuario.rol_avc === 'encargado_finca')    renderEncargado();
   else if(usuario.rol_avc === 'supervisor_actividad')renderSupervisor();
+  else if(usuario.rol_avc === 'operador_campo')     renderOperadorCampo();
+  else if(usuario.rol_avc === 'digitador_riegos')   renderDigitadorRiegos();
+  else if(usuario.rol_avc === 'operador_riegos')    renderOperadorRiegos();
   else if(usuario.rol_avc === 'admin' || usuario.rol_avc === 'programador') renderAdmin();
   else {
     document.getElementById('appBody').innerHTML = `<div class="empty">Tu rol "${usuario.rol_avc}" todavía no tiene vista en CSIA Campo. Usa la app de captura tradicional.</div>`;
@@ -897,8 +1120,15 @@ async function renderJefeProgramar(){
   const distrito = jerarquia[distritoNombre];
   const fechaDefault = hoyISO();
 
-  // Listado de actividades programables (excluir fertirriegos que tienen flujo propio)
-  const actsProg = actividadesAll.filter(a => !a.es_fertirriego);
+  // Listado de actividades programables.
+  // Incluimos los fertirriegos solo si están enlazados a 'avc_riego_goteo'
+  // (subactividades del proceso RIEGO GOTEO). Los demás fertirriegos antiguos
+  // (sin requiere_detalle) se siguen excluyendo porque tienen su propio flujo.
+  const actsProg = actividadesAll.filter(a =>
+    !a.es_fertirriego || a.requiere_detalle === 'avc_riego_goteo'
+  );
+  // Guardar para que onProcesoChange lo encuentre
+  window.__actsProgramables = actsProg;
 
   // Lista plana de lotes del distrito + lista de fincas
   const todosLotes = [];
@@ -964,10 +1194,23 @@ async function renderJefeProgramar(){
       </div>
       <div class="field-help" id="loteInfo" style="display:none;margin-top:-8px;margin-bottom:14px"></div>
       <div class="field">
+        <label>Proceso</label>
+        <select id="progProceso" onchange="onProcesoChange()">
+          <option value="">Seleccionar proceso...</option>
+          ${(() => {
+            // Procesos únicos que tienen al menos una actividad programable (no fertirriego)
+            const procsConActs = new Set(actsProg.map(a => `${a.codigo_macroproceso}-${a.codigo_proceso}`));
+            return procesosAll
+              .filter(p => procsConActs.has(`${p.codigo_macroproceso}-${p.codigo_proceso}`))
+              .map(p => `<option value="${p.codigo_macroproceso}-${p.codigo_proceso}">${p.nombre}</option>`)
+              .join('');
+          })()}
+        </select>
+      </div>
+      <div class="field">
         <label>Actividad</label>
-        <select id="progActividad" onchange="onActividadChange()">
-          <option value="">Seleccionar actividad...</option>
-          ${actsProg.map(a => `<option value="${a.codigo_actividad}">${a.codigo_actividad} · ${a.nombre_actividad}</option>`).join('')}
+        <select id="progActividad" onchange="onActividadChange()" disabled>
+          <option value="">Primero elige un proceso</option>
         </select>
       </div>
       
@@ -1018,22 +1261,97 @@ let mapaActividadSupervisor = null;
 async function cargarMapaActividadSupervisor(){
   if(mapaActividadSupervisor !== null) return mapaActividadSupervisor;
   const { data, error } = await sb.from('avc_usuario_actividades')
-    .select('email, codigo_actividad, user_perfiles!inner(nombre_completo, cargo, rol_avc, activo)');
+    .select('email, codigo_actividad, user_perfiles!inner(nombre_completo, cargo, rol_avc, activo, estacion_default)');
   if(error){ console.error('Error cargando supervisores:', error); mapaActividadSupervisor = {}; return mapaActividadSupervisor; }
   
   const m = {};
+  // Para goteo: mapa especial { codigo_actividad: { fincaNombre: ejecutor } }
+  // resuelto al saber qué finca está eligiendo el jefe
+  const goteoPorOperador = []; // [{email, nombre, cargo, estacion_default, codigo_actividad}]
+  
+  const rolesEjecutorUnico = new Set([
+    'supervisor_actividad',
+    'operador_campo',
+    'operador_riegos',
+    'digitador_riegos'
+  ]);
   (data||[]).forEach(r => {
-    // Solo supervisores activos
-    if(r.user_perfiles && r.user_perfiles.rol_avc === 'supervisor_actividad' && r.user_perfiles.activo){
-      m[r.codigo_actividad] = {
-        email: r.email,
-        nombre: r.user_perfiles.nombre_completo,
-        cargo: r.user_perfiles.cargo
-      };
+    if(r.user_perfiles && rolesEjecutorUnico.has(r.user_perfiles.rol_avc) && r.user_perfiles.activo){
+      // Para operadores de riegos (goteo), guardamos por estación
+      if(r.user_perfiles.rol_avc === 'operador_riegos'){
+        goteoPorOperador.push({
+          email: r.email,
+          nombre: r.user_perfiles.nombre_completo,
+          cargo: r.user_perfiles.cargo,
+          estacion_default: r.user_perfiles.estacion_default,
+          codigo_actividad: r.codigo_actividad
+        });
+      } else {
+        // Para el resto, tomamos el primero (1:1)
+        m[r.codigo_actividad] = {
+          email: r.email,
+          nombre: r.user_perfiles.nombre_completo,
+          cargo: r.user_perfiles.cargo
+        };
+      }
     }
   });
   mapaActividadSupervisor = m;
+  // Cache aparte para goteo
+  window.__operadoresGoteo = goteoPorOperador;
   return m;
+}
+
+// Resuelve qué operador de goteo está asignado a la estación que cubre la finca dada
+async function resolverOperadorGoteo(codigoActividad, fincaNombre){
+  if(!window.__operadoresGoteo || window.__operadoresGoteo.length === 0) return null;
+  if(!fincaNombre) return null;
+
+  // 1. Buscar la estación que cubre esa finca
+  const { data: estacionFincas, error } = await sb.from('pm_estacion_fincas')
+    .select('estacion_id, finca_nombre, pm_estaciones_riego(nombre)')
+    .ilike('finca_nombre', fincaNombre);
+  if(error || !estacionFincas || estacionFincas.length === 0){
+    return null;
+  }
+  const estacionId = estacionFincas[0].estacion_id;
+  const estacionNombre = estacionFincas[0].pm_estaciones_riego ? estacionFincas[0].pm_estaciones_riego.nombre : '';
+
+  // 2. Buscar operador con esa estación y permiso para esa actividad
+  const op = window.__operadoresGoteo.find(o =>
+    o.estacion_default === estacionId && o.codigo_actividad === codigoActividad
+  );
+  if(!op) return null;
+
+  return {
+    email: op.email,
+    nombre: op.nombre,
+    cargo: op.cargo,
+    estacion_nombre: estacionNombre,
+    estacion_id: estacionId
+  };
+}
+
+function renderizarBloqueOperadorGoteo(box, opInfo, btnProg){
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="banner" style="background:#E6F1FB;border-left:3px solid #378ADD;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div class="banner-lbl" style="color:#0F4F8C">📌 Asignación automática</div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+        <i class="ti ti-droplet-half-2" style="font-size:18px;color:#378ADD"></i>
+        <div><strong>${opInfo.nombre}</strong> <span style="color:#6b7280">(${opInfo.cargo})</span></div>
+      </div>
+      <div style="font-size:12px;color:#0F4F8C;margin-top:6px">
+        Estación: ${opInfo.estacion_nombre}
+      </div>
+    </div>
+  `;
+  // Datos que guardarProgramacion leerá
+  box.setAttribute('data-modelo', 'SUPERVISOR');
+  box.setAttribute('data-email-encargado', '');
+  box.setAttribute('data-email-supervisor', opInfo.email);
+  box.setAttribute('data-bloqueado', '0');
+  if(btnProg) btnProg.disabled = false;
 }
 
 // Cache de mezclas activas y sus productos
@@ -1150,6 +1468,40 @@ function onLoteChange(){
   info.innerHTML = `<i class="ti ti-user"></i> Encargado del lote: <strong>${encNombre}</strong>`;
   info.style.display = 'block';
   actualizarBloqueAsignacion();
+}
+
+async function onProcesoChange(){
+  const procSel = document.getElementById('progProceso');
+  const actSel = document.getElementById('progActividad');
+  if(!procSel || !actSel) return;
+
+  const valor = procSel.value; // "macro-proc" ej "1-6"
+  if(!valor){
+    actSel.innerHTML = '<option value="">Primero elige un proceso</option>';
+    actSel.disabled = true;
+    actSel.value = '';
+    // Resetear todo lo que dependa de la actividad
+    await onActividadChange();
+    return;
+  }
+
+  const [macro, proc] = valor.split('-').map(n => parseInt(n));
+  const actsProg = window.__actsProgramables || actividadesAll.filter(a => !a.es_fertirriego);
+  const filtered = actsProg.filter(a =>
+    a.codigo_macroproceso === macro && a.codigo_proceso === proc
+  );
+
+  if(filtered.length === 0){
+    actSel.innerHTML = '<option value="">No hay actividades en este proceso</option>';
+    actSel.disabled = true;
+  } else {
+    actSel.innerHTML = '<option value="">Seleccionar actividad...</option>' +
+      filtered.map(a => `<option value="${a.codigo_actividad}">${a.codigo_actividad} · ${a.nombre_actividad}</option>`).join('');
+    actSel.disabled = false;
+  }
+  actSel.value = '';
+  // Disparar el reset de bloques dependientes
+  await onActividadChange();
 }
 
 async function onActividadChange(){
@@ -1340,7 +1692,36 @@ function armarCamposExtrasJefe(act){
     </div>
     <div class="field-help" style="margin-top:-8px;margin-bottom:14px">Valores típicos: distancia 1.5 m, ancho surco 2 m.</div>`;
   }
-  
+
+  // RIEGO GOTEO: turno + horas estimadas
+  if(act.requiere_detalle === 'avc_riego_goteo'){
+    return `<div class="field-row">
+      <div class="field">
+        <label>Turno de riego</label>
+        <select id="progTurno">
+          <option value="">Seleccionar turno...</option>
+          ${[1,2,3,4,5,6].map(n => `<option value="${n}">Turno ${n}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Horas estimadas <span style="color:#6b7280;font-weight:400">(duración)</span></label>
+        <input type="number" step="0.5" min="0" id="progHorasEst" placeholder="0.0"/>
+      </div>
+    </div>
+    <div class="field-help" style="margin-top:-8px;margin-bottom:14px">El operador recibirá la tarea con el turno y cuántas horas debe regar.</div>`;
+  }
+
+  // RIEGO ASPERSION / GRAVEDAD / PIVOTE: solo horas estimadas (sin turno)
+  if(act.requiere_detalle === 'avc_riego_aspersion'
+     || act.requiere_detalle === 'avc_riego_gravedad'
+     || act.requiere_detalle === 'avc_riego_pivote'){
+    return `<div class="field">
+      <label>Horas estimadas <span style="color:#6b7280;font-weight:400">(duración del riego)</span></label>
+      <input type="number" step="0.5" min="0" id="progHorasEst" placeholder="0.0"/>
+      <div class="field-help" style="margin-top:4px">Cuántas horas se planifica que dure el riego.</div>
+    </div>`;
+  }
+
   return '';
 }
 
@@ -1371,7 +1752,46 @@ function actualizarBloqueAsignacion(){
   const act = actividadesAll.find(a => a.codigo_actividad === cod);
   if(!act){ box.style.display = 'none'; return; }
   const modelo = act.modelo_comparticion;
-  const supInfo = mapaActividadSupervisor ? mapaActividadSupervisor[cod] : null;
+  let supInfo = mapaActividadSupervisor ? mapaActividadSupervisor[cod] : null;
+
+  // CASO ESPECIAL: riego goteo (operador por estación según finca)
+  // resolverOperadorGoteo es async, así que lo invocamos por separado y
+  // re-renderizamos cuando llegue el resultado.
+  if(act.requiere_detalle === 'avc_riego_goteo'){
+    const fincaLote = loteOpt.value;
+    const reg = plantios.find(p => p.finca_lote === fincaLote);
+    const fincaNombre = reg ? reg.descripcion_finca : null;
+    if(fincaNombre){
+      resolverOperadorGoteo(cod, fincaNombre).then(opInfo => {
+        if(opInfo){
+          // Inyectar en el mapa para que guardarProgramacion lo encuentre
+          mapaActividadSupervisor[cod] = {
+            email: opInfo.email,
+            nombre: opInfo.nombre,
+            cargo: opInfo.cargo
+          };
+          // Re-render manual del bloque con esta info
+          renderizarBloqueOperadorGoteo(box, opInfo, btnProg);
+        } else {
+          // No hay operador asignado a esa estación
+          box.style.display = '';
+          box.innerHTML = `
+            <div class="banner" style="background:#FCE9E9;border:1px solid #A32D2D;padding:10px;border-radius:8px;margin-bottom:14px">
+              <div class="banner-lbl" style="color:#A32D2D">⚠ No se puede programar</div>
+              <div style="margin-top:8px;font-size:13px;color:#A32D2D">
+                No hay operador de riegos asignado a la estación que cubre la finca <strong>${fincaNombre}</strong>. Pide al administrador que asigne uno (campo <code>estacion_default</code>).
+              </div>
+            </div>`;
+          box.setAttribute('data-bloqueado', '1');
+          if(btnProg) btnProg.disabled = true;
+        }
+      });
+      // Mientras resuelve, mostrar loading
+      box.style.display = '';
+      box.innerHTML = `<div class="banner" style="padding:10px;border-radius:8px;margin-bottom:14px;background:#F9FAFB"><div style="font-size:12px;color:#6b7280"><i class="ti ti-loader"></i> Resolviendo operador asignado...</div></div>`;
+      return;
+    }
+  }
 
   let html = '';
   let bloquear = false;
@@ -1705,6 +2125,27 @@ async function guardarProgramacion(){
       dosis_ajustes = ajustes;
     }
 
+    // Capturar turno si la actividad es de riego goteo
+    let turno = null;
+    if(act && act.requiere_detalle === 'avc_riego_goteo'){
+      const turnoEl = document.getElementById('progTurno');
+      if(turnoEl && turnoEl.value){
+        turno = parseInt(turnoEl.value);
+      }
+    }
+
+    // Capturar horas estimadas si es actividad de riego (cualquier tipo)
+    let horas_estimadas = null;
+    if(act && (act.requiere_detalle === 'avc_riego_goteo'
+            || act.requiere_detalle === 'avc_riego_aspersion'
+            || act.requiere_detalle === 'avc_riego_gravedad'
+            || act.requiere_detalle === 'avc_riego_pivote')){
+      const horasEl = document.getElementById('progHorasEst');
+      if(horasEl && horasEl.value !== ''){
+        horas_estimadas = parseFloat(horasEl.value);
+      }
+    }
+
     // Si es EXTERNA → cae primero a PM como solicitud, no directo al supervisor.
     // PM revisará, ajustará si hace falta y "enviará" a los supervisores.
     const estadoInicial = (modelo === 'EXTERNA') ? 'solicitud_pm' : 'planificado';
@@ -1729,7 +2170,9 @@ async function guardarProgramacion(){
       email_encargado,
       email_supervisor,
       hora_programada: hora,
-      prioridad
+      prioridad,
+      turno,
+      horas_estimadas
     }).select().single();
 
     if(error) throw new Error(error.message);
@@ -1935,17 +2378,43 @@ async function renderEncargado(){
 
 async function renderEncargadoTareas(){
   const hoy = hoyISO();
-  const { data: tareas } = await sb.from('avc_programacion')
+
+  // Traemos en una sola query: hoy + futuras + pendientes (vencidas no completadas)
+  // Pendientes vencidas = fecha < hoy AND estado NOT IN (completada, modificada, no_ejecutable)
+  const { data: todas, error } = await sb.from('avc_programacion')
     .select('*')
     .eq('email_encargado', usuario.email)
-    .eq('fecha', hoy)
     .eq('eliminada', false)
+    .order('fecha', { ascending: true })
     .order('hora_programada', { nullsFirst: false });
 
-  const total = (tareas || []).length;
-  const completadas = (tareas || []).filter(t => t.estado === 'completada' || t.estado === 'modificada').length;
-  const haPlan = (tareas || []).reduce((s,t) => s + parseFloat(t.ha_plan || 0), 0);
-  const haReal = (tareas || []).reduce((s,t) => s + parseFloat(t.ha_real || 0), 0);
+  if(error){
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${error.message}</div>`;
+  }
+
+  // Clasificar
+  const estadosCerrados = new Set(['completada','modificada','no_ejecutable']);
+  const dHoy = [];
+  const dFuturas = [];
+  const dVencidas = [];
+
+  (todas || []).forEach(t => {
+    if(t.fecha === hoy){
+      dHoy.push(t);
+    } else if(t.fecha > hoy){
+      dFuturas.push(t);
+    } else if(!estadosCerrados.has(t.estado)){
+      // Pasado, no completada → pendiente
+      dVencidas.push(t);
+    }
+    // Pasado completada → no se muestra
+  });
+
+  // Stats de hoy
+  const total = dHoy.length;
+  const completadas = dHoy.filter(t => estadosCerrados.has(t.estado)).length;
+  const haPlan = dHoy.reduce((s,t) => s + parseFloat(t.ha_plan || 0), 0);
+  const haReal = dHoy.reduce((s,t) => s + parseFloat(t.ha_real || 0), 0);
 
   let html = `
     <div class="banner">
@@ -1953,53 +2422,86 @@ async function renderEncargadoTareas(){
       <div class="banner-txt">${total} tarea${total!==1?'s':''} hoy · ${haPlan.toFixed(1)} ha proyectadas</div>
     </div>
     <div class="stat-grid">
-      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Hoy</div><div class="stat-val">${total}</div></div>
       <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${completadas}</div></div>
-      <div class="stat"><div class="stat-lbl">HA real</div><div class="stat-val">${haReal.toFixed(1)}</div></div>
+      <div class="stat"><div class="stat-lbl">Pendientes</div><div class="stat-val" style="${dVencidas.length>0?'color:#A32D2D':''}">${dVencidas.length}</div></div>
     </div>
   `;
 
-  if(total === 0){
-    html += '<div class="empty"><i class="ti ti-calendar-off"></i>No tienes tareas asignadas para hoy.</div>';
-  } else {
-    html += '<div class="sec-h">Hoy</div>';
-    tareas.forEach(t => {
-      const compartida = esCompartida(t.codigo_actividad);
-      const ico = iconoActividad(t.codigo_actividad);
-      const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
-                   t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
-      let metaTxt = '';
-      if(t.estado === 'planificado' || t.estado === 'pendiente'){
-        metaTxt = `Plan: ${t.ha_plan} ha · ${t.personal_plan} personas`;
-      } else if(t.estado === 'esperando_supervisor'){
-        metaTxt = `Esperando que el supervisor abra la operación`;
-      } else if(t.estado === 'esperando_encargado'){
-        metaTxt = `Supervisor registró <strong>${t.ha_real || 0} ha</strong> · falta tu parte`;
-      } else if(t.estado === 'completada' || t.estado === 'modificada'){
-        metaTxt = `${t.ha_real || 0} ha completadas`;
-      } else {
-        metaTxt = `${t.ha_real || 0}/${t.ha_plan} ha`;
-      }
+  if(total === 0 && dFuturas.length === 0 && dVencidas.length === 0){
+    html += '<div class="empty"><i class="ti ti-calendar-off"></i>No tienes tareas asignadas.</div>';
+    return html;
+  }
 
-      html += `<div class="tarea-card estado-${t.estado}" onclick="abrirTarea(${t.id})">
-        <div class="tarea-head">
-          <div class="tarea-left">
-            <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
-            <div class="tarea-info">
-              ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
-              <div class="tarea-title">${actNombre(t.codigo_actividad)}</div>
-            </div>
-          </div>
-          <div class="tarea-tags">
-            ${badge(t.estado)}
-            ${prio}
+  // Helper para renderizar una tarea
+  const renderTarea = (t, contexto) => {
+    const compartida = esCompartida(t.codigo_actividad);
+    const ico = iconoActividad(t.codigo_actividad);
+    const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
+                 t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
+    let metaTxt = '';
+    if(t.estado === 'planificado' || t.estado === 'pendiente'){
+      metaTxt = `Plan: ${t.ha_plan} ha · ${t.personal_plan} personas`;
+    } else if(t.estado === 'esperando_supervisor'){
+      metaTxt = `Esperando que el supervisor abra la operación`;
+    } else if(t.estado === 'esperando_encargado'){
+      metaTxt = `Supervisor registró <strong>${t.ha_real || 0} ha</strong> · falta tu parte`;
+    } else if(estadosCerrados.has(t.estado)){
+      metaTxt = `${t.ha_real || 0} ha completadas`;
+    } else {
+      metaTxt = `${t.ha_real || 0}/${t.ha_plan} ha`;
+    }
+
+    // En vencidas mostrar el aviso de cuántos días atrás
+    let avisoVencida = '';
+    if(contexto === 'vencida'){
+      const diff = Math.floor((new Date(hoy) - new Date(t.fecha)) / 86400000);
+      avisoVencida = `<div style="font-size:11px;color:#A32D2D;font-weight:600;margin-top:4px"><i class="ti ti-alert-circle"></i> Vencida hace ${diff} día${diff!==1?'s':''} (${fmtFecha(t.fecha)})</div>`;
+    } else if(contexto === 'futura'){
+      avisoVencida = `<div style="font-size:11px;color:#6b7280;margin-top:4px"><i class="ti ti-calendar"></i> Programada para ${fmtFecha(t.fecha)}</div>`;
+    }
+
+    return `<div class="tarea-card estado-${t.estado}" onclick="abrirTarea(${t.id})">
+      <div class="tarea-head">
+        <div class="tarea-left">
+          <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+          <div class="tarea-info">
+            ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
+            <div class="tarea-title">${actNombre(t.codigo_actividad)}</div>
           </div>
         </div>
-        <div class="tarea-sub">${t.finca_lote}${compartida ? ' · con supervisor' : ''}</div>
-        <div class="tarea-meta">${metaTxt}</div>
-      </div>`;
-    });
+        <div class="tarea-tags">
+          ${badge(t.estado)}
+          ${prio}
+        </div>
+      </div>
+      <div class="tarea-sub">${t.finca_lote}${compartida ? ' · con supervisor' : ''}</div>
+      <div class="tarea-meta">${metaTxt}</div>
+      ${avisoVencida}
+    </div>`;
+  };
+
+  // SECCIÓN 1: HOY
+  if(dHoy.length > 0){
+    html += '<div class="sec-h">Hoy</div>';
+    dHoy.forEach(t => { html += renderTarea(t, 'hoy'); });
+  } else {
+    html += '<div class="sec-h">Hoy</div>';
+    html += '<div class="empty" style="padding:14px"><i class="ti ti-calendar-off"></i>Sin tareas para hoy</div>';
   }
+
+  // SECCIÓN 2: PRÓXIMAS
+  if(dFuturas.length > 0){
+    html += `<div class="sec-h" style="margin-top:18px">Próximas (${dFuturas.length})</div>`;
+    dFuturas.forEach(t => { html += renderTarea(t, 'futura'); });
+  }
+
+  // SECCIÓN 3: PENDIENTES VENCIDAS
+  if(dVencidas.length > 0){
+    html += `<div class="sec-h" style="margin-top:18px;color:#A32D2D"><i class="ti ti-alert-circle"></i> Pendientes sin completar (${dVencidas.length})</div>`;
+    dVencidas.forEach(t => { html += renderTarea(t, 'vencida'); });
+  }
+
   return html;
 }
 
@@ -2785,6 +3287,3689 @@ async function renderSupervisorHistorial(){
 }
 
 /* ============================================================
+   CSIA Campo — Módulo RIEGOS
+   Vista: OPERADOR_CAMPO (mediciones de humedad)
+   
+   Bloque para insertar en app.html.
+   Ubicación sugerida: justo ANTES de la línea `async function renderAdmin(){`
+============================================================ */
+
+/* ============================================================
+   VISTA: OPERADOR DE CAMPO (mediciones de humedad)
+============================================================ */
+async function renderOperadorCampo(){
+  const tabs = [
+    {id:'tareas',    label:'Tareas'},
+    {id:'libre',     label:'Captura libre'},
+    {id:'historial', label:'Historial'}
+  ];
+  if(!currentTab) currentTab = 'tareas';
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'tareas')          body = await renderOperadorCampoTareas();
+  else if(currentTab === 'libre')      body = await renderOperadorCampoCapturar();
+  else if(currentTab === 'historial')  body = await renderOperadorCampoHistorial();
+  else                                 body = await renderOperadorCampoTareas();
+
+  document.getElementById('appBody').innerHTML = `
+    ${renderTabs(tabs)}
+    <div class="sec active">${body}</div>
+  `;
+}
+
+async function renderOperadorCampoTareas(){
+  const hoy = hoyISO();
+
+  // El jefe asigna las mediciones poniendo el email del operador en email_supervisor
+  // (reutilizamos esa columna porque el flujo es: 1 ejecutor único, sin encargado)
+  const { data: tareas, error } = await sb.from('avc_programacion')
+    .select('*')
+    .eq('email_supervisor', usuario.email)
+    .eq('fecha', hoy)
+    .eq('eliminada', false)
+    .neq('estado', 'solicitud_pm')
+    .order('hora_programada', { nullsFirst: false });
+
+  if(error){
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${error.message}</div>`;
+  }
+
+  const total = (tareas || []).length;
+  const compl = (tareas || []).filter(t => t.estado === 'completada' || t.estado === 'modificada').length;
+  const pend  = (tareas || []).filter(t => t.estado === 'planificado' || t.estado === 'pendiente').length;
+
+  let html = `
+    <div class="banner blue">
+      <div class="banner-lbl">Mediciones del día</div>
+      <div class="banner-txt">${total} tarea${total!==1?'s':''} asignada${total!==1?'s':''} hoy</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${compl}</div></div>
+      <div class="stat"><div class="stat-lbl">Pend.</div><div class="stat-val">${pend}</div></div>
+    </div>
+  `;
+
+  if(total === 0){
+    html += `<div class="empty"><i class="ti ti-calendar-off"></i>Sin tareas asignadas hoy. Puedes registrar una medición espontánea desde "Captura libre".</div>`;
+    return html;
+  }
+
+  tareas.forEach(t => {
+    const ico = iconoActividad(t.codigo_actividad);
+    const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
+                 t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
+    let metaTxt = '';
+    if(t.estado === 'planificado' || t.estado === 'pendiente'){
+      metaTxt = `Pendiente de medición`;
+    } else if(t.estado === 'completada' || t.estado === 'modificada'){
+      metaTxt = `Completada`;
+    } else {
+      metaTxt = t.estado;
+    }
+    html += `<div class="tarea-card estado-${t.estado}" onclick="abrirTareaOperador(${t.id})">
+      <div class="tarea-head">
+        <div class="tarea-left">
+          <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+          <div class="tarea-info">
+            ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
+            <div class="tarea-title">${actNombre(t.codigo_actividad)}</div>
+          </div>
+        </div>
+        <div class="tarea-tags">${badge(t.estado)}${prio}</div>
+      </div>
+      <div class="tarea-sub">${t.finca_lote}</div>
+      <div class="tarea-meta">${metaTxt}</div>
+    </div>`;
+  });
+
+  return html;
+}
+
+async function abrirTareaOperador(progId){
+  // Cargar la programación
+  const { data: t, error } = await sb.from('avc_programacion')
+    .select('*').eq('id', progId).maybeSingle();
+  if(error || !t){
+    toast('No se pudo cargar la tarea', 'error');
+    return;
+  }
+
+  // Si la tarea ya está completada, abrir en modo lectura
+  if(t.estado === 'completada' || t.estado === 'modificada'){
+    toast('Esta tarea ya fue completada', 'info');
+    return;
+  }
+
+  // Detectar el flujo según la actividad
+  const act = actividadesAll.find(a => a.codigo_actividad === t.codigo_actividad);
+  if(!act){
+    toast('Actividad no encontrada en catálogo', 'error');
+    return;
+  }
+
+  if(act.requiere_detalle === 'avc_riego_humedad'){
+    return abrirCapturaHumedad(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_caudales'){
+    toast('Captura de caudales aún no implementada', 'info');
+    return;
+  }
+  toast('Tipo de actividad no manejado por la app del operador: ' + (act.requiere_detalle || 'sin tabla detalle'), 'error');
+}
+
+async function renderOperadorCampoCapturar(){
+  // El operador de campo registra sólo mediciones de humedad (cód. 69901)
+  // Toma las fincas/lotes desde maestro_plantios sin filtro por encargado
+  // (porque opera transversal a fincas como solicitud puntual del jefe)
+
+  return `
+    <div class="banner blue">
+      <div class="banner-lbl">Mediciones de humedad</div>
+      <div class="banner-txt">Registra la lectura en campo. Los datos llegan al jefe que solicitó la medición.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Nueva medición</div>
+      <button class="btn btn-primary" onclick="abrirCapturaHumedad()">
+        <i class="ti ti-droplet-half-2"></i> Registrar medición
+      </button>
+    </div>
+  `;
+}
+
+async function abrirCapturaHumedad(programacion){
+  // Si llega con `programacion`, es captura desde tarea asignada.
+  // Si no, es captura libre (fuera de plan).
+  const esProgramada = !!programacion;
+
+  // Guardar contexto para guardarMedicionHumedad
+  window.__humProgramacion = programacion || null;
+
+  // Determinar finca/lote preseleccionados si viene de programación
+  let preFinca = '';
+  let preLote = '';
+  let preFincaDescripcion = '';
+  if(esProgramada){
+    // finca_lote viene como "AGRICASA01" → necesitamos descripcion_finca para mostrar bonito
+    const fLote = programacion.finca_lote;
+    // Buscar en plantios para sacar descripción
+    const reg = plantios.find(p => p.finca_lote === fLote);
+    if(reg){
+      preFincaDescripcion = reg.descripcion_finca;
+      preFinca = reg.descripcion_finca;
+    } else {
+      // Si no está en plantios cargados, consultamos directo
+      const { data } = await sb.from('maestro_plantios')
+        .select('descripcion_finca, lote')
+        .eq('finca_lote', fLote)
+        .maybeSingle();
+      if(data){
+        preFincaDescripcion = data.descripcion_finca;
+        preFinca = data.descripcion_finca;
+        preLote = data.lote;
+      }
+    }
+    // Si no obtuvimos el lote por la búsqueda anterior, extraerlo del finca_lote
+    if(!preLote){
+      const m = fLote.match(/\d+$/);
+      preLote = m ? parseInt(m[0]) : '';
+    }
+  }
+
+  // Fincas para captura libre (no programada)
+  const fincasUnicas = [...new Set(plantios.map(p => p.descripcion_finca))]
+    .filter(Boolean).sort();
+
+  // Banner de contexto si es programada
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${preFincaDescripcion || programacion.finca_lote}</strong> · Lote ${preLote}
+      </div>
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Medición espontánea, fuera del plan diario</div>
+    </div>
+  `;
+
+  // Bloque de finca y lote (lockeado si es programada)
+  const bloqueFincaLote = esProgramada ? `
+    <div class="field">
+      <label>Finca</label>
+      <input type="text" value="${preFincaDescripcion || programacion.finca_lote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <input type="text" value="Lote ${preLote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <input type="hidden" id="humFinca" value="${preFinca}"/>
+    <input type="hidden" id="humLote" value="${preLote}"/>
+  ` : `
+    <div class="field">
+      <label>Finca</label>
+      <select id="humFinca" onchange="actualizarLotesHumedad()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="humLote"><option value="">Primero elige finca</option></select>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Medición de humedad</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. 69901</div>
+    ${contextoBanner}
+    ${bloqueFincaLote}
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha</label>
+        <input type="date" id="humFecha" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Hora medición</label>
+        <input type="time" id="humHora" value="${horaActual()}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tipo de medición</label>
+      <div class="seg-control" style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="seg-btn active" id="tipoEmp"
+                onclick="seleccionarTipoMedicion('EMPIRICA')">
+          <i class="ti ti-eye"></i> Empírica / Calicata
+        </button>
+        <button type="button" class="seg-btn" id="tipoTens"
+                onclick="seleccionarTipoMedicion('TENSIOMETROS')">
+          <i class="ti ti-gauge"></i> Tensiómetros
+        </button>
+      </div>
+    </div>
+
+    <!-- Bloque EMPÍRICA -->
+    <div id="bloqueEmpirica" class="hum-bloque">
+      <div class="field">
+        <label>Estado del suelo</label>
+        <div class="estado-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
+          <button type="button" class="estado-btn" data-estado="MARCHITEZ"
+                  onclick="seleccionarEstado('MARCHITEZ')"
+                  style="padding:14px 8px;border:1.5px solid #FCA5A5;background:#FEF2F2;color:#991B1B;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer">
+            <i class="ti ti-flame" style="display:block;font-size:22px;margin-bottom:4px"></i>
+            Marchitez<br><span style="font-weight:400;font-size:10px">(bajo)</span>
+          </button>
+          <button type="button" class="estado-btn" data-estado="CAPACIDAD_CAMPO"
+                  onclick="seleccionarEstado('CAPACIDAD_CAMPO')"
+                  style="padding:14px 8px;border:1.5px solid #86EFAC;background:#F0FDF4;color:#166534;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer">
+            <i class="ti ti-check" style="display:block;font-size:22px;margin-bottom:4px"></i>
+            Cap. campo<br><span style="font-weight:400;font-size:10px">(óptimo)</span>
+          </button>
+          <button type="button" class="estado-btn" data-estado="SATURADO"
+                  onclick="seleccionarEstado('SATURADO')"
+                  style="padding:14px 8px;border:1.5px solid #93C5FD;background:#EFF6FF;color:#1E40AF;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer">
+            <i class="ti ti-droplet-filled" style="display:block;font-size:22px;margin-bottom:4px"></i>
+            Saturado<br><span style="font-weight:400;font-size:10px">(alto)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bloque TENSIÓMETROS -->
+    <div id="bloqueTensiometros" class="hum-bloque" style="display:none">
+      <div class="field-row">
+        <div class="field">
+          <label>Medición 20 cm <span style="color:#6b7280;font-weight:400">(cb)</span></label>
+          <input type="number" step="0.1" id="humTens20" placeholder="0.0"/>
+        </div>
+        <div class="field">
+          <label>Medición 40 cm <span style="color:#6b7280;font-weight:400">(cb)</span></label>
+          <input type="number" step="0.1" id="humTens40" placeholder="0.0"/>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:-8px;margin-bottom:10px">
+        Datos en centibares (cb). Valores altos = suelo seco.
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="humObs" placeholder="Notas adicionales sobre la medición..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnHum" onclick="guardarMedicionHumedad()">
+      <i class="ti ti-device-floppy"></i> Guardar medición
+    </button>
+  `;
+
+  // Estado interno del modal
+  window.__humTipo = 'EMPIRICA';
+  window.__humEstado = null;
+
+  showModal();
+}
+
+async function actualizarLotesHumedad(){
+  const finca = document.getElementById('humFinca').value;
+  const sel = document.getElementById('humLote');
+  if(!finca){
+    sel.innerHTML = '<option value="">Primero elige finca</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Cargando lotes...</option>';
+
+  const { data: lotes, error } = await sb.from('maestro_plantios')
+    .select('lote')
+    .eq('descripcion_finca', finca)
+    .order('lote');
+
+  if(error){
+    sel.innerHTML = '<option value="">Error cargando lotes</option>';
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+
+  const lotesUnicos = [...new Set((lotes || []).map(p => p.lote))].filter(l => l != null);
+  if(lotesUnicos.length === 0){
+    sel.innerHTML = '<option value="">No hay lotes para esta finca</option>';
+    return;
+  }
+  sel.innerHTML = `<option value="">Seleccionar lote...</option>` +
+    lotesUnicos.map(l => `<option value="${l}">Lote ${l}</option>`).join('');
+}
+
+function seleccionarTipoMedicion(tipo){
+  window.__humTipo = tipo;
+  window.__humEstado = null;
+
+  // Toggle botones segmentados
+  document.getElementById('tipoEmp').classList.toggle('active', tipo === 'EMPIRICA');
+  document.getElementById('tipoTens').classList.toggle('active', tipo === 'TENSIOMETROS');
+
+  // Mostrar/ocultar bloques
+  document.getElementById('bloqueEmpirica').style.display    = tipo === 'EMPIRICA'     ? '' : 'none';
+  document.getElementById('bloqueTensiometros').style.display = tipo === 'TENSIOMETROS' ? '' : 'none';
+
+  // Limpiar selección de estado
+  document.querySelectorAll('.estado-btn').forEach(b => {
+    b.style.transform = '';
+    b.style.boxShadow = '';
+  });
+}
+
+function seleccionarEstado(estado){
+  window.__humEstado = estado;
+  document.querySelectorAll('.estado-btn').forEach(b => {
+    const sel = b.dataset.estado === estado;
+    b.style.transform = sel ? 'scale(1.03)' : '';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.25)' : '';
+  });
+}
+
+async function guardarMedicionHumedad(){
+  const btn = document.getElementById('btnHum');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca   = document.getElementById('humFinca').value;
+    const loteRaw = document.getElementById('humLote').value;
+    const fecha   = document.getElementById('humFecha').value;
+    const hora    = document.getElementById('humHora').value || null;
+    const obs     = document.getElementById('humObs').value.trim() || null;
+    const tipo    = window.__humTipo;
+    const prog    = window.__humProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)    throw new Error('Selecciona una finca');
+    if(!loteRaw)  throw new Error('Selecciona un lote');
+    if(!fecha)    throw new Error('Indica la fecha de medición');
+
+    const lote = parseInt(loteRaw);
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote,
+      fecha,
+      hora_medicion: hora,
+      tipo_medicion: tipo,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    if(tipo === 'EMPIRICA'){
+      if(!window.__humEstado) throw new Error('Selecciona el estado del suelo');
+      payload.empirica_estado = window.__humEstado;
+    } else {
+      const t20 = parseFloat(document.getElementById('humTens20').value);
+      const t40 = parseFloat(document.getElementById('humTens40').value);
+      if(isNaN(t20) || isNaN(t40)) throw new Error('Indica ambas mediciones (20 cm y 40 cm)');
+      payload.tens_20cm = t20;
+      payload.tens_40cm = t40;
+    }
+
+    // 1) Insertar la medición
+    const { error: e1 } = await sb.from('avc_riego_humedad').insert(payload);
+    if(e1) throw new Error(e1.message);
+
+    // 2) Si vino de una tarea programada, marcarla como completada
+    if(esProgramada){
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update({
+          estado: 'completada',
+          observacion_real: obs,
+          cerrado_por: usuario.email,
+          cerrado_en: new Date().toISOString()
+        })
+        .eq('id', prog.id);
+      if(e2){
+        console.warn('No se pudo cerrar la programación:', e2);
+        // No throw: la medición se guardó, esto es secundario
+      }
+
+      // 3) Notificar al jefe que creó la tarea
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) { /* notificación es best-effort */ }
+    }
+
+    toast(esProgramada ? 'Medición guardada y tarea completada' : 'Medición guardada correctamente');
+    closeModal();
+    window.__humProgramacion = null;
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar medición';
+  }
+}
+
+async function renderOperadorCampoHistorial(){
+  const { data: regs, error } = await sb.from('avc_riego_humedad')
+    .select('*')
+    .eq('registrado_por', usuario.email)
+    .order('fecha', { ascending: false })
+    .order('hora_medicion', { ascending: false })
+    .limit(50);
+
+  if(error){
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${error.message}</div>`;
+  }
+  if(!regs || regs.length === 0){
+    return '<div class="empty"><i class="ti ti-file-text"></i>Aún no tienes mediciones registradas.</div>';
+  }
+
+  return regs.map(r => {
+    let detalle = '';
+    let color = '';
+    if(r.tipo_medicion === 'EMPIRICA'){
+      const labels = {
+        'MARCHITEZ':        {txt:'Marchitez (bajo)',    color:'#991B1B'},
+        'CAPACIDAD_CAMPO':  {txt:'Capacidad campo',     color:'#166534'},
+        'SATURADO':         {txt:'Saturado (alto)',     color:'#1E40AF'}
+      };
+      const e = labels[r.empirica_estado] || {txt:r.empirica_estado, color:'#6b7280'};
+      detalle = `<span style="color:${e.color};font-weight:600">${e.txt}</span>`;
+    } else {
+      detalle = `<span>20 cm: <strong>${r.tens_20cm} cb</strong> · 40 cm: <strong>${r.tens_40cm} cb</strong></span>`;
+    }
+
+    return `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('humedad', ${r.id})">
+      <div class="reg-head">
+        <span class="badge">${r.tipo_medicion === 'EMPIRICA' ? 'Empírica' : 'Tensiómetros'}</span>
+        <span class="reg-fecha">${fmtFecha(r.fecha)}${r.hora_medicion ? ' · '+r.hora_medicion.substring(0,5) : ''}</span>
+      </div>
+      <div class="reg-finca">${r.finca} · Lote ${r.lote}</div>
+      <div class="reg-meta">${detalle}</div>
+      ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+/* Helper: hora actual en formato HH:MM (si no existe ya en el archivo) */
+function horaActual(){
+  const d = new Date();
+  return d.toTimeString().substring(0,5);
+}
+
+
+/* ============================================================
+   VISTA: DIGITADOR DE RIEGOS
+   Captura: caudales (69902), riego aspersión (10601),
+            riego gravedad (12101), riego pivote (12201).
+   Sólo caudales implementado en esta iteración.
+============================================================ */
+async function renderDigitadorRiegos(){
+  const tabs = [
+    {id:'tareas',    label:'Tareas'},
+    {id:'libre',     label:'Captura libre'},
+    {id:'historial', label:'Historial'}
+  ];
+  if(!currentTab) currentTab = 'tareas';
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'tareas')          body = await renderDigitadorRiegosTareas();
+  else if(currentTab === 'libre')      body = await renderDigitadorRiegosCapturaLibre();
+  else if(currentTab === 'historial')  body = await renderDigitadorRiegosHistorial();
+  else                                 body = await renderDigitadorRiegosTareas();
+
+  document.getElementById('appBody').innerHTML = `
+    ${renderTabs(tabs)}
+    <div class="sec active">${body}</div>
+  `;
+}
+
+async function renderDigitadorRiegosTareas(){
+  const hoy = hoyISO();
+
+  const { data: tareas, error } = await sb.from('avc_programacion')
+    .select('*')
+    .eq('email_supervisor', usuario.email)
+    .eq('fecha', hoy)
+    .eq('eliminada', false)
+    .neq('estado', 'solicitud_pm')
+    .order('hora_programada', { nullsFirst: false });
+
+  if(error){
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${error.message}</div>`;
+  }
+
+  const total = (tareas || []).length;
+  const compl = (tareas || []).filter(t => t.estado === 'completada' || t.estado === 'modificada').length;
+  const pend  = (tareas || []).filter(t => t.estado === 'planificado' || t.estado === 'pendiente').length;
+
+  let html = `
+    <div class="banner blue">
+      <div class="banner-lbl">Mediciones y riegos del día</div>
+      <div class="banner-txt">${total} tarea${total!==1?'s':''} asignada${total!==1?'s':''} hoy</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${compl}</div></div>
+      <div class="stat"><div class="stat-lbl">Pend.</div><div class="stat-val">${pend}</div></div>
+    </div>
+  `;
+
+  if(total === 0){
+    html += `<div class="empty"><i class="ti ti-calendar-off"></i>Sin tareas asignadas hoy. Puedes registrar una medición espontánea desde "Captura libre".</div>`;
+    return html;
+  }
+
+  tareas.forEach(t => {
+    const ico = iconoActividad(t.codigo_actividad);
+    const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
+                 t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
+    let metaTxt = '';
+    if(t.estado === 'planificado' || t.estado === 'pendiente'){
+      metaTxt = `Pendiente de registro`;
+    } else if(t.estado === 'completada' || t.estado === 'modificada'){
+      metaTxt = `Completada`;
+    } else {
+      metaTxt = t.estado;
+    }
+    html += `<div class="tarea-card estado-${t.estado}" onclick="abrirTareaDigitador(${t.id})">
+      <div class="tarea-head">
+        <div class="tarea-left">
+          <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+          <div class="tarea-info">
+            ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
+            <div class="tarea-title">${actNombre(t.codigo_actividad)}</div>
+          </div>
+        </div>
+        <div class="tarea-tags">${badge(t.estado)}${prio}</div>
+      </div>
+      <div class="tarea-sub">${t.finca_lote || '—'}</div>
+      <div class="tarea-meta">${metaTxt}</div>
+    </div>`;
+  });
+
+  return html;
+}
+
+async function abrirTareaDigitador(progId){
+  const { data: t, error } = await sb.from('avc_programacion')
+    .select('*').eq('id', progId).maybeSingle();
+  if(error || !t){
+    toast('No se pudo cargar la tarea', 'error');
+    return;
+  }
+
+  if(t.estado === 'completada' || t.estado === 'modificada'){
+    toast('Esta tarea ya fue completada', 'info');
+    return;
+  }
+
+  const act = actividadesAll.find(a => a.codigo_actividad === t.codigo_actividad);
+  if(!act){
+    toast('Actividad no encontrada en catálogo', 'error');
+    return;
+  }
+
+  if(act.requiere_detalle === 'avc_riego_caudales'){
+    return abrirCapturaCaudales(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_aspersion'){
+    return abrirCapturaAspersion(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_gravedad'){
+    return abrirCapturaGravedad(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_pivote'){
+    return abrirCapturaPivote(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_drenajes'){
+    return abrirCapturaDrenajes(t);
+  }
+  toast('Tipo de actividad no manejado por la app del digitador: ' + (act.requiere_detalle || 'sin tabla detalle'), 'error');
+}
+
+
+/* ============================================================
+   CAPTURA: MEDICIÓN DE CAUDALES (cód. 69902)
+============================================================ */
+
+// Cache de fuentes de agua (ríos / canales / lagunas)
+let fuentesAguaCache = null;
+async function cargarFuentesAgua(){
+  if(fuentesAguaCache) return fuentesAguaCache;
+  const { data, error } = await sb.from('pm_fuentes_agua')
+    .select('id, codigo, nombre, tipo, unidad')
+    .eq('activa', true)
+    .order('tipo')
+    .order('nombre');
+  if(error){ console.error('Error cargando fuentes:', error); return []; }
+  fuentesAguaCache = data || [];
+  return fuentesAguaCache;
+}
+
+async function abrirCapturaCaudales(programacion){
+  const esProgramada = !!programacion;
+  window.__caudalProgramacion = programacion || null;
+
+  const fuentes = await cargarFuentesAgua();
+  if(fuentes.length === 0){
+    toast('No hay fuentes de agua configuradas. Pide al admin que las cargue.', 'error');
+    return;
+  }
+
+  // Agrupar por tipo para el dropdown
+  const grupos = { rio: [], canal: [], laguna: [] };
+  fuentes.forEach(f => { if(grupos[f.tipo]) grupos[f.tipo].push(f); });
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">Medición de caudales del día</div>
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Medición espontánea, fuera del plan diario</div>
+    </div>
+  `;
+
+  // Construir el <select> agrupando por tipo
+  let opcionesHtml = '<option value="">Seleccionar fuente...</option>';
+  if(grupos.rio.length){
+    opcionesHtml += '<optgroup label="Ríos">';
+    grupos.rio.forEach(f => {
+      opcionesHtml += `<option value="${f.id}" data-unidad="${f.unidad}" data-tipo="${f.tipo}" data-nombre="${f.nombre}">${f.nombre}</option>`;
+    });
+    opcionesHtml += '</optgroup>';
+  }
+  if(grupos.canal.length){
+    opcionesHtml += '<optgroup label="Canales">';
+    grupos.canal.forEach(f => {
+      opcionesHtml += `<option value="${f.id}" data-unidad="${f.unidad}" data-tipo="${f.tipo}" data-nombre="${f.nombre}">${f.nombre}</option>`;
+    });
+    opcionesHtml += '</optgroup>';
+  }
+  if(grupos.laguna.length){
+    opcionesHtml += '<optgroup label="Lagunas">';
+    grupos.laguna.forEach(f => {
+      opcionesHtml += `<option value="${f.id}" data-unidad="${f.unidad}" data-tipo="${f.tipo}" data-nombre="${f.nombre}">${f.nombre}</option>`;
+    });
+    opcionesHtml += '</optgroup>';
+  }
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Medición de caudales</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. 69902</div>
+    ${contextoBanner}
+
+    <div class="field">
+      <label>Fuente de agua</label>
+      <select id="caudFuente" onchange="onCaudalFuenteChange()">
+        ${opcionesHtml}
+      </select>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha</label>
+        <input type="date" id="caudFecha" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Hora</label>
+        <input type="time" id="caudHora" value="${horaActual()}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label id="caudValorLbl">Valor medido</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" step="0.01" id="caudValor" placeholder="0.00" style="flex:1"/>
+        <span id="caudUnidad" style="font-size:13px;color:#6b7280;min-width:90px">—</span>
+      </div>
+      <div id="caudValorHelp" class="field-help" style="display:none;margin-top:4px;color:#6b7280;font-size:11px"></div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="caudObs" placeholder="Condiciones del río, color del agua, etc."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnCaud" onclick="guardarMedicionCaudal()">
+      <i class="ti ti-device-floppy"></i> Guardar medición
+    </button>
+  `;
+
+  showModal();
+}
+
+function onCaudalFuenteChange(){
+  const sel = document.getElementById('caudFuente');
+  const unidadSpan = document.getElementById('caudUnidad');
+  const lbl = document.getElementById('caudValorLbl');
+  const help = document.getElementById('caudValorHelp');
+  const opt = sel.options[sel.selectedIndex];
+  if(!opt || !opt.value){
+    unidadSpan.textContent = '—';
+    lbl.textContent = 'Valor medido';
+    help.style.display = 'none';
+    return;
+  }
+  const unidad = opt.getAttribute('data-unidad');
+  const tipo = opt.getAttribute('data-tipo');
+  if(unidad === 'metros_cubicos'){
+    unidadSpan.textContent = 'm³';
+    lbl.textContent = 'Volumen';
+    help.textContent = 'Las lagunas se miden en metros cúbicos (m³)';
+    help.style.display = 'block';
+  } else {
+    unidadSpan.textContent = 'gal/min';
+    lbl.textContent = 'Caudal';
+    help.textContent = 'Ríos y canales se miden en galones por minuto';
+    help.style.display = 'block';
+  }
+}
+
+async function guardarMedicionCaudal(){
+  const btn = document.getElementById('btnCaud');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const sel = document.getElementById('caudFuente');
+    const fuenteId = parseInt(sel.value);
+    const opt = sel.options[sel.selectedIndex];
+    const fecha = document.getElementById('caudFecha').value;
+    const hora = document.getElementById('caudHora').value || null;
+    const valorRaw = document.getElementById('caudValor').value;
+    const obs = document.getElementById('caudObs').value.trim() || null;
+    const prog = window.__caudalProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!fuenteId)          throw new Error('Selecciona la fuente de agua');
+    if(!fecha)             throw new Error('Indica la fecha');
+    const valor = parseFloat(valorRaw);
+    if(isNaN(valor) || valor < 0) throw new Error('Indica un valor numérico válido');
+
+    const unidad = opt.getAttribute('data-unidad');
+
+    const payload = {
+      fuente_id: fuenteId,
+      fecha,
+      hora,
+      valor_medido: valor,
+      unidad,
+      observaciones: obs,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    const { error: e1 } = await sb.from('avc_riego_caudales').insert(payload);
+    if(e1) throw new Error(e1.message);
+
+    // Si vino de programación, cerrar la tarea
+    if(esProgramada){
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update({
+          estado: 'completada',
+          observacion_real: obs,
+          cerrado_por: usuario.email,
+          cerrado_en: new Date().toISOString()
+        })
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Caudal registrado y tarea completada' : 'Caudal registrado correctamente');
+    closeModal();
+    window.__caudalProgramacion = null;
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar medición';
+  }
+}
+
+
+/* ============================================================
+   CAPTURA: RIEGO POR GRAVEDAD (cód. 12101)
+============================================================ */
+
+async function abrirCapturaGravedad(programacion){
+  const esProgramada = !!programacion;
+  window.__gravedadProgramacion = programacion || null;
+
+  // Si es programada, finca/lote vienen del finca_lote de la programación
+  let preFinca = '';
+  let preLote = '';
+  let preFincaDescripcion = '';
+  let preArea = null;
+  if(esProgramada){
+    const fLote = programacion.finca_lote;
+    const reg = plantios.find(p => p.finca_lote === fLote);
+    if(reg){
+      preFincaDescripcion = reg.descripcion_finca;
+      preFinca = reg.descripcion_finca;
+      preArea = reg.area_ha;
+    } else {
+      const { data } = await sb.from('maestro_plantios')
+        .select('descripcion_finca, lote, area_ha')
+        .eq('finca_lote', fLote)
+        .maybeSingle();
+      if(data){
+        preFincaDescripcion = data.descripcion_finca;
+        preFinca = data.descripcion_finca;
+        preLote = data.lote;
+        preArea = data.area_ha;
+      }
+    }
+    if(!preLote){
+      const m = fLote.match(/\d+$/);
+      preLote = m ? parseInt(m[0]) : '';
+    }
+  }
+
+  const fincasUnicas = [...new Set(plantios.map(p => p.descripcion_finca))]
+    .filter(Boolean).sort();
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${preFincaDescripcion || programacion.finca_lote}</strong> · Lote ${preLote}${preArea ? ` (${preArea} ha)` : ''}
+      </div>
+      ${programacion.ha_plan ? `<div style="font-size:12px;color:#185FA5;margin-top:2px">Plan: ${programacion.ha_plan} ha · ${programacion.personal_plan || 0} personas</div>` : ''}
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Registro espontáneo, fuera del plan diario</div>
+    </div>
+  `;
+
+  const bloqueFincaLote = esProgramada ? `
+    <div class="field">
+      <label>Finca</label>
+      <input type="text" value="${preFincaDescripcion || programacion.finca_lote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <input type="text" value="Lote ${preLote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <input type="hidden" id="gravFinca" value="${preFinca}"/>
+    <input type="hidden" id="gravLote" value="${preLote}"/>
+  ` : `
+    <div class="field">
+      <label>Finca</label>
+      <select id="gravFinca" onchange="actualizarLotesGravedad()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="gravLote"><option value="">Primero elige finca</option></select>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Riego por gravedad</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. 12101</div>
+    ${contextoBanner}
+    ${bloqueFincaLote}
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha inicio</label>
+        <input type="date" id="gravFechaIni" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Fecha fin</label>
+        <input type="date" id="gravFechaFin" value="${hoyISO()}"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="gravHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="gravHoraFin"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>HA regadas</label>
+        <input type="number" step="0.01" id="gravHa" placeholder="0.00" value="${esProgramada && programacion.ha_plan ? programacion.ha_plan : ''}"/>
+      </div>
+      <div class="field">
+        <label>Personal</label>
+        <input type="number" id="gravPersonal" placeholder="0" value="${esProgramada && programacion.personal_plan ? programacion.personal_plan : ''}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tiempo de agua en el lote <span style="color:#6b7280;font-weight:400">(horas)</span></label>
+      <input type="number" step="0.1" id="gravTiempoAgua" placeholder="0.0"/>
+      <div class="field-help" style="font-size:11px;color:#6b7280;margin-top:4px">Cuánto tiempo estuvo el agua circulando en el lote</div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="gravObs" placeholder="Condiciones, incidencias, ajustes..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnGrav" onclick="guardarRiegoGravedad()">
+      <i class="ti ti-device-floppy"></i> Guardar registro
+    </button>
+  `;
+
+  showModal();
+}
+
+async function actualizarLotesGravedad(){
+  const finca = document.getElementById('gravFinca').value;
+  const sel = document.getElementById('gravLote');
+  if(!finca){
+    sel.innerHTML = '<option value="">Primero elige finca</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Cargando lotes...</option>';
+
+  const { data: lotes, error } = await sb.from('maestro_plantios')
+    .select('lote')
+    .eq('descripcion_finca', finca)
+    .order('lote');
+
+  if(error){
+    sel.innerHTML = '<option value="">Error cargando lotes</option>';
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+
+  const lotesUnicos = [...new Set((lotes || []).map(p => p.lote))].filter(l => l != null);
+  if(lotesUnicos.length === 0){
+    sel.innerHTML = '<option value="">No hay lotes</option>';
+    return;
+  }
+  sel.innerHTML = `<option value="">Seleccionar lote...</option>` +
+    lotesUnicos.map(l => `<option value="${l}">Lote ${l}</option>`).join('');
+}
+
+async function guardarRiegoGravedad(){
+  const btn = document.getElementById('btnGrav');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca       = document.getElementById('gravFinca').value;
+    const loteRaw     = document.getElementById('gravLote').value;
+    const fechaIni    = document.getElementById('gravFechaIni').value;
+    const fechaFin    = document.getElementById('gravFechaFin').value;
+    const horaIni     = document.getElementById('gravHoraIni').value || null;
+    const horaFin     = document.getElementById('gravHoraFin').value || null;
+    const haRaw       = document.getElementById('gravHa').value;
+    const personalRaw = document.getElementById('gravPersonal').value;
+    const tiempoRaw   = document.getElementById('gravTiempoAgua').value;
+    const obs         = document.getElementById('gravObs').value.trim() || null;
+    const prog        = window.__gravedadProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)    throw new Error('Selecciona una finca');
+    if(!loteRaw)  throw new Error('Selecciona un lote');
+    if(!fechaIni) throw new Error('Indica la fecha de inicio');
+
+    const lote = parseInt(loteRaw);
+    const haRegadas = haRaw === '' ? null : parseFloat(haRaw);
+    const personal = personalRaw === '' ? null : parseInt(personalRaw);
+    const tiempoAgua = tiempoRaw === '' ? null : parseFloat(tiempoRaw);
+
+    if(haRegadas !== null && (isNaN(haRegadas) || haRegadas < 0))
+      throw new Error('HA regadas debe ser un número válido');
+    if(personal !== null && (isNaN(personal) || personal < 0))
+      throw new Error('Personal debe ser un número válido');
+    if(tiempoAgua !== null && (isNaN(tiempoAgua) || tiempoAgua < 0))
+      throw new Error('Tiempo de agua debe ser un número válido');
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote,
+      fecha_inicio: fechaIni,
+      fecha_fin: fechaFin || fechaIni,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      personal,
+      ha_regadas: haRegadas,
+      tiempo_agua_lote: tiempoAgua,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    const { error: e1 } = await sb.from('avc_riego_gravedad').insert(payload);
+    if(e1) throw new Error(e1.message);
+
+    if(esProgramada){
+      const updates = {
+        estado: 'completada',
+        ha_real: haRegadas,
+        personal_real: personal,
+        observacion_real: obs,
+        cerrado_por: usuario.email,
+        cerrado_en: new Date().toISOString()
+      };
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update(updates)
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Riego registrado y tarea completada' : 'Riego registrado correctamente');
+    closeModal();
+    window.__gravedadProgramacion = null;
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar registro';
+  }
+}
+
+
+/* ============================================================
+   CAPTURA: DRENAJES (cód. 10611, 10612, 10613, 10714,
+                       12102, 12103, 12104, 12202, 12203, 12204)
+============================================================ */
+
+// Caches de catálogos
+let tiposDrenajeCache = null;
+let maquinariaDrenajeCache = null;
+let actividadesDrenajeCache = null;
+
+async function cargarCatalogosDrenaje(){
+  if(tiposDrenajeCache && maquinariaDrenajeCache && actividadesDrenajeCache) return;
+  const [tipos, maq, acts] = await Promise.all([
+    sb.from('pm_tipos_drenaje').select('id, codigo, nombre, es_mecanizado').eq('activo', true).order('codigo'),
+    sb.from('pm_tipos_maquinaria_drenaje').select('id, codigo, nombre').eq('activa', true).order('codigo'),
+    sb.from('pm_actividades_drenaje').select('id, codigo, nombre').eq('activa', true).order('codigo')
+  ]);
+  tiposDrenajeCache = tipos.data || [];
+  maquinariaDrenajeCache = maq.data || [];
+  actividadesDrenajeCache = acts.data || [];
+}
+
+async function abrirCapturaDrenajes(programacion){
+  const esProgramada = !!programacion;
+  window.__drenajeProgramacion = programacion || null;
+
+  await cargarCatalogosDrenaje();
+  if(tiposDrenajeCache.length === 0){
+    toast('No hay tipos de drenaje configurados. Pide al admin que los cargue.', 'error');
+    return;
+  }
+
+  // Resolver finca/lote desde la programación
+  let preFinca = '';
+  let preLote = '';
+  let preFincaDescripcion = '';
+  if(esProgramada){
+    const fLote = programacion.finca_lote;
+    const reg = plantios.find(p => p.finca_lote === fLote);
+    if(reg){
+      preFincaDescripcion = reg.descripcion_finca;
+      preFinca = reg.descripcion_finca;
+    } else {
+      const { data } = await sb.from('maestro_plantios')
+        .select('descripcion_finca, lote')
+        .eq('finca_lote', fLote)
+        .maybeSingle();
+      if(data){
+        preFincaDescripcion = data.descripcion_finca;
+        preFinca = data.descripcion_finca;
+        preLote = data.lote;
+      }
+    }
+    if(!preLote){
+      const m = fLote.match(/\d+$/);
+      preLote = m ? parseInt(m[0]) : '';
+    }
+  }
+
+  const fincasUnicas = [...new Set(plantios.map(p => p.descripcion_finca))]
+    .filter(Boolean).sort();
+
+  // Sugerir tipo de drenaje según el código de actividad (si es programada)
+  let tipoSugeridoCodigo = null;
+  if(esProgramada){
+    const cod = programacion.codigo_actividad;
+    if(cod === 10611 || cod === 12102 || cod === 12202) tipoSugeridoCodigo = 'DRENAJE_MANUAL';
+    else if(cod === 10612 || cod === 12103 || cod === 12203) tipoSugeridoCodigo = 'DRENAJE_MECANIZADO';
+    else if(cod === 10613 || cod === 12104 || cod === 12204) tipoSugeridoCodigo = 'MANTENIMIENTO_MECANIZADO';
+    else if(cod === 10714) tipoSugeridoCodigo = 'DRENAJE_MANUAL'; // genérico
+  }
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${preFincaDescripcion || programacion.finca_lote}</strong> · Lote ${preLote}
+      </div>
+      <div style="font-size:11px;color:#185FA5;margin-top:2px">${actNombre(programacion.codigo_actividad)}</div>
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Registro espontáneo, fuera del plan diario</div>
+    </div>
+  `;
+
+  const bloqueFincaLote = esProgramada ? `
+    <div class="field">
+      <label>Finca</label>
+      <input type="text" value="${preFincaDescripcion || programacion.finca_lote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <input type="text" value="Lote ${preLote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <input type="hidden" id="drnFinca" value="${preFinca}"/>
+    <input type="hidden" id="drnLote" value="${preLote}"/>
+  ` : `
+    <div class="field">
+      <label>Finca</label>
+      <select id="drnFinca" onchange="actualizarLotesDrenaje()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="drnLote"><option value="">Primero elige finca</option></select>
+    </div>
+  `;
+
+  // Tipos de drenaje (4 opciones en grilla 2x2)
+  const tipoButtons = tiposDrenajeCache.map(t => {
+    const sugerido = tipoSugeridoCodigo === t.codigo;
+    return `<button type="button" class="tipo-drn-btn" data-tipo-id="${t.id}" data-codigo="${t.codigo}" data-mec="${t.es_mecanizado ? '1' : '0'}"
+              onclick="seleccionarTipoDrenaje(${t.id})"
+              style="padding:11px 8px;border:1.5px solid ${sugerido?'#1D9E75':'#D1D5DB'};background:${sugerido?'#E8F5EE':'white'};color:${sugerido?'#0F5530':'#374151'};border-radius:10px;font-size:12px;font-weight:500;cursor:pointer;text-align:center">
+              ${t.nombre}
+              ${t.es_mecanizado ? '<div style="font-size:10px;font-weight:400;color:#6b7280;margin-top:2px">Requiere maquinaria</div>' : ''}
+            </button>`;
+  }).join('');
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Drenaje</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. ${esProgramada ? programacion.codigo_actividad : 'libre'}</div>
+    ${contextoBanner}
+    ${bloqueFincaLote}
+
+    <div class="field">
+      <label>Fecha</label>
+      <input type="date" id="drnFecha" value="${hoyISO()}"/>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="drnHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="drnHoraFin"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tipo de drenaje</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+        ${tipoButtons}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Actividad de drenaje</label>
+      <select id="drnActividad">
+        <option value="">Seleccionar actividad...</option>
+        ${actividadesDrenajeCache.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Metros de avance</label>
+      <input type="number" step="0.01" id="drnMetros" placeholder="0.00"/>
+    </div>
+
+    <!-- BLOQUE MECANIZADO (oculto por defecto) -->
+    <div id="drnBloqueMec" style="display:none;background:#F9FAFB;border-radius:8px;padding:12px;margin-bottom:14px;border:1px dashed #D1D5DB">
+      <div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">
+        <i class="ti ti-tractor"></i> Detalles de maquinaria
+      </div>
+
+      <div class="field">
+        <label>Maquinaria</label>
+        <select id="drnMaquinaria">
+          <option value="">Seleccionar...</option>
+          ${maquinariaDrenajeCache.map(m => `<option value="${m.id}">${m.nombre}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Propio / Alquilado</label>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button type="button" class="propalq-btn" data-val="propio" onclick="seleccionarPropAlq('propio')"
+                  style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+            Propio
+          </button>
+          <button type="button" class="propalq-btn" data-val="alquilado" onclick="seleccionarPropAlq('alquilado')"
+                  style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+            Alquilado
+          </button>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Horómetro inicio</label>
+          <input type="number" step="0.01" id="drnHorIni" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>Horómetro fin</label>
+          <input type="number" step="0.01" id="drnHorFin" placeholder="0.00"/>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="drnObs" placeholder="Detalles, incidencias..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnDrn" onclick="guardarDrenaje()">
+      <i class="ti ti-device-floppy"></i> Guardar drenaje
+    </button>
+  `;
+
+  window.__drnTipoId = null;
+  window.__drnEsMec = false;
+  window.__drnPropAlq = null;
+
+  showModal();
+
+  // Si hay tipo sugerido, auto-seleccionarlo
+  if(tipoSugeridoCodigo){
+    const sugerido = tiposDrenajeCache.find(t => t.codigo === tipoSugeridoCodigo);
+    if(sugerido) seleccionarTipoDrenaje(sugerido.id);
+  }
+}
+
+async function actualizarLotesDrenaje(){
+  const finca = document.getElementById('drnFinca').value;
+  const sel = document.getElementById('drnLote');
+  if(!finca){
+    sel.innerHTML = '<option value="">Primero elige finca</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Cargando lotes...</option>';
+
+  const { data: lotes, error } = await sb.from('maestro_plantios')
+    .select('lote')
+    .eq('descripcion_finca', finca)
+    .order('lote');
+
+  if(error){
+    sel.innerHTML = '<option value="">Error</option>';
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+
+  const lotesUnicos = [...new Set((lotes || []).map(p => p.lote))].filter(l => l != null);
+  if(lotesUnicos.length === 0){
+    sel.innerHTML = '<option value="">No hay lotes</option>';
+    return;
+  }
+  sel.innerHTML = `<option value="">Seleccionar lote...</option>` +
+    lotesUnicos.map(l => `<option value="${l}">Lote ${l}</option>`).join('');
+}
+
+function seleccionarTipoDrenaje(tipoId){
+  window.__drnTipoId = tipoId;
+  const tipo = tiposDrenajeCache.find(t => t.id === tipoId);
+  window.__drnEsMec = !!(tipo && tipo.es_mecanizado);
+
+  // Resaltar el botón seleccionado
+  document.querySelectorAll('.tipo-drn-btn').forEach(b => {
+    const sel = parseInt(b.dataset.tipoId) === tipoId;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+
+  // Mostrar / ocultar bloque de maquinaria
+  const bloqueMec = document.getElementById('drnBloqueMec');
+  if(bloqueMec){
+    bloqueMec.style.display = window.__drnEsMec ? 'block' : 'none';
+  }
+}
+
+function seleccionarPropAlq(val){
+  window.__drnPropAlq = val;
+  document.querySelectorAll('.propalq-btn').forEach(b => {
+    const sel = b.dataset.val === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.fontWeight = sel ? '600' : '500';
+  });
+}
+
+async function guardarDrenaje(){
+  const btn = document.getElementById('btnDrn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca       = document.getElementById('drnFinca').value;
+    const loteRaw     = document.getElementById('drnLote').value;
+    const fecha       = document.getElementById('drnFecha').value;
+    const horaIni     = document.getElementById('drnHoraIni').value || null;
+    const horaFin     = document.getElementById('drnHoraFin').value || null;
+    const actId       = document.getElementById('drnActividad').value;
+    const metrosRaw   = document.getElementById('drnMetros').value;
+    const obs         = document.getElementById('drnObs').value.trim() || null;
+    const tipoId      = window.__drnTipoId;
+    const esMec       = window.__drnEsMec;
+    const prog        = window.__drenajeProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)   throw new Error('Selecciona una finca');
+    if(!loteRaw) throw new Error('Selecciona un lote');
+    if(!fecha)   throw new Error('Indica la fecha');
+    if(!tipoId)  throw new Error('Selecciona el tipo de drenaje');
+
+    const lote = parseInt(loteRaw);
+    const metros = metrosRaw === '' ? null : parseFloat(metrosRaw);
+    if(metros !== null && (isNaN(metros) || metros < 0))
+      throw new Error('Metros de avance debe ser un número válido');
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote,
+      fecha,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      tipo_drenaje_id: tipoId,
+      metros_avance: metros,
+      actividad_drenaje_id: actId ? parseInt(actId) : null,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    if(esMec){
+      const maqId = document.getElementById('drnMaquinaria').value;
+      const horIniRaw = document.getElementById('drnHorIni').value;
+      const horFinRaw = document.getElementById('drnHorFin').value;
+      if(!maqId)             throw new Error('Selecciona la maquinaria');
+      if(!window.__drnPropAlq) throw new Error('Indica si es propia o alquilada');
+      payload.tipo_maquinaria_id = parseInt(maqId);
+      payload.propio_alquilado = window.__drnPropAlq;
+      payload.horometro_ini = horIniRaw === '' ? null : parseFloat(horIniRaw);
+      payload.horometro_fin = horFinRaw === '' ? null : parseFloat(horFinRaw);
+    }
+
+    const { error: e1 } = await sb.from('avc_riego_drenajes').insert(payload);
+    if(e1) throw new Error(e1.message);
+
+    if(esProgramada){
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update({
+          estado: 'completada',
+          observacion_real: obs,
+          cerrado_por: usuario.email,
+          cerrado_en: new Date().toISOString()
+        })
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Drenaje registrado y tarea completada' : 'Drenaje registrado correctamente');
+    closeModal();
+    window.__drenajeProgramacion = null;
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar drenaje';
+  }
+}
+
+
+
+/* ============================================================
+   CAPTURA: RIEGO POR PIVOTE (cód. 12201)
+============================================================ */
+
+// Cache de bombas de pivote (Z2K-Z2Q, las 6 exclusivas)
+let bombasPivoteCache = null;
+async function cargarBombasPivote(){
+  if(bombasPivoteCache) return bombasPivoteCache;
+  const { data, error } = await sb.from('pm_bombas')
+    .select('codigo, nombre, energia')
+    .eq('aplica_pivote', true)
+    .eq('activa', true)
+    .order('codigo');
+  if(error){ console.error('Error cargando bombas pivote:', error); return []; }
+  bombasPivoteCache = data || [];
+  return bombasPivoteCache;
+}
+
+async function abrirCapturaPivote(programacion){
+  const esProgramada = !!programacion;
+  window.__pivoteProgramacion = programacion || null;
+
+  const bombas = await cargarBombasPivote();
+  if(bombas.length === 0){
+    toast('No hay bombas de pivote configuradas. Pide al admin que las cargue.', 'error');
+    return;
+  }
+
+  // Resolver finca/lote
+  let preFinca = '';
+  let preLote = '';
+  let preFincaDescripcion = '';
+  let preArea = null;
+  if(esProgramada){
+    const fLote = programacion.finca_lote;
+    const reg = plantios.find(p => p.finca_lote === fLote);
+    if(reg){
+      preFincaDescripcion = reg.descripcion_finca;
+      preFinca = reg.descripcion_finca;
+      preArea = reg.area_ha;
+    } else {
+      const { data } = await sb.from('maestro_plantios')
+        .select('descripcion_finca, lote, area_ha')
+        .eq('finca_lote', fLote)
+        .maybeSingle();
+      if(data){
+        preFincaDescripcion = data.descripcion_finca;
+        preFinca = data.descripcion_finca;
+        preLote = data.lote;
+        preArea = data.area_ha;
+      }
+    }
+    if(!preLote){
+      const m = fLote.match(/\d+$/);
+      preLote = m ? parseInt(m[0]) : '';
+    }
+  }
+
+  const fincasUnicas = [...new Set(plantios.map(p => p.descripcion_finca))]
+    .filter(Boolean).sort();
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${preFincaDescripcion || programacion.finca_lote}</strong> · Lote ${preLote}${preArea ? ` (${preArea} ha)` : ''}
+      </div>
+      ${programacion.ha_plan ? `<div style="font-size:12px;color:#185FA5;margin-top:2px">Plan: ${programacion.ha_plan} ha</div>` : ''}
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Registro espontáneo, fuera del plan diario</div>
+    </div>
+  `;
+
+  const bloqueFincaLote = esProgramada ? `
+    <div class="field">
+      <label>Finca</label>
+      <input type="text" value="${preFincaDescripcion || programacion.finca_lote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <input type="text" value="Lote ${preLote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <input type="hidden" id="pvtFinca" value="${preFinca}"/>
+    <input type="hidden" id="pvtLote" value="${preLote}"/>
+  ` : `
+    <div class="field">
+      <label>Finca</label>
+      <select id="pvtFinca" onchange="actualizarLotesPivote()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="pvtLote"><option value="">Primero elige finca</option></select>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Riego por pivote</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. 12201</div>
+    ${contextoBanner}
+    ${bloqueFincaLote}
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha inicio</label>
+        <input type="date" id="pvtFechaIni" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Fecha fin</label>
+        <input type="date" id="pvtFechaFin" value="${hoyISO()}"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="pvtHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="pvtHoraFin"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Bomba</label>
+      <select id="pvtBomba">
+        <option value="">Seleccionar bomba...</option>
+        ${bombas.map(b => `<option value="${b.codigo}">${b.codigo}${b.nombre ? ' · '+b.nombre : ''}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Tipo de operación</label>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="pvt-op-btn" data-val="pivote" onclick="seleccionarTipoPivoteOp('pivote')"
+                style="flex:1;padding:11px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer">
+          <i class="ti ti-360" style="display:block;font-size:20px;margin-bottom:3px"></i>
+          Pivote
+        </button>
+        <button type="button" class="pvt-op-btn" data-val="rebombeo" onclick="seleccionarTipoPivoteOp('rebombeo')"
+                style="flex:1;padding:11px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer">
+          <i class="ti ti-refresh" style="display:block;font-size:20px;margin-bottom:3px"></i>
+          Rebombeo
+        </button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tamaño del pivote</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
+        <button type="button" class="pvt-tam-btn" data-val="pequeno" onclick="seleccionarTamPivote('pequeno')"
+                style="padding:10px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer">
+          Pequeño
+        </button>
+        <button type="button" class="pvt-tam-btn" data-val="mediano" onclick="seleccionarTamPivote('mediano')"
+                style="padding:10px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer">
+          Mediano
+        </button>
+        <button type="button" class="pvt-tam-btn" data-val="grande" onclick="seleccionarTamPivote('grande')"
+                style="padding:10px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:12px;font-weight:500;cursor:pointer">
+          Grande
+        </button>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Horómetro inicio</label>
+        <input type="number" step="0.01" id="pvtHorIni" placeholder="0.00"/>
+      </div>
+      <div class="field">
+        <label>Horómetro fin</label>
+        <input type="number" step="0.01" id="pvtHorFin" placeholder="0.00"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Número de vueltas</label>
+        <input type="number" step="0.01" id="pvtVueltas" placeholder="0.00"/>
+      </div>
+      <div class="field">
+        <label>HA regadas</label>
+        <input type="number" step="0.01" id="pvtHa" placeholder="0.00" value="${esProgramada && programacion.ha_plan ? programacion.ha_plan : ''}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>% de trabajo</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px">
+        <button type="button" class="pvt-pct-btn" data-val="30" onclick="seleccionarPctPivote(30)"
+                style="padding:11px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">
+          30%
+        </button>
+        <button type="button" class="pvt-pct-btn" data-val="60" onclick="seleccionarPctPivote(60)"
+                style="padding:11px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">
+          60%
+        </button>
+        <button type="button" class="pvt-pct-btn" data-val="90" onclick="seleccionarPctPivote(90)"
+                style="padding:11px;border:1.5px solid #D1D5DB;background:white;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">
+          90%
+        </button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="pvtObs" placeholder="Condiciones, paradas, ajustes..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnPvt" onclick="guardarRiegoPivote()">
+      <i class="ti ti-device-floppy"></i> Guardar registro
+    </button>
+  `;
+
+  window.__pvtTipoOp = null;
+  window.__pvtTam = null;
+  window.__pvtPct = null;
+
+  showModal();
+}
+
+async function actualizarLotesPivote(){
+  const finca = document.getElementById('pvtFinca').value;
+  const sel = document.getElementById('pvtLote');
+  if(!finca){
+    sel.innerHTML = '<option value="">Primero elige finca</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Cargando lotes...</option>';
+
+  const { data: lotes, error } = await sb.from('maestro_plantios')
+    .select('lote')
+    .eq('descripcion_finca', finca)
+    .order('lote');
+
+  if(error){
+    sel.innerHTML = '<option value="">Error</option>';
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+
+  const lotesUnicos = [...new Set((lotes || []).map(p => p.lote))].filter(l => l != null);
+  if(lotesUnicos.length === 0){
+    sel.innerHTML = '<option value="">No hay lotes</option>';
+    return;
+  }
+  sel.innerHTML = `<option value="">Seleccionar lote...</option>` +
+    lotesUnicos.map(l => `<option value="${l}">Lote ${l}</option>`).join('');
+}
+
+function seleccionarTipoPivoteOp(val){
+  window.__pvtTipoOp = val;
+  document.querySelectorAll('.pvt-op-btn').forEach(b => {
+    const sel = b.dataset.val === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+}
+
+function seleccionarTamPivote(val){
+  window.__pvtTam = val;
+  document.querySelectorAll('.pvt-tam-btn').forEach(b => {
+    const sel = b.dataset.val === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+}
+
+function seleccionarPctPivote(val){
+  window.__pvtPct = val;
+  document.querySelectorAll('.pvt-pct-btn').forEach(b => {
+    const sel = parseInt(b.dataset.val) === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+}
+
+async function guardarRiegoPivote(){
+  const btn = document.getElementById('btnPvt');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca       = document.getElementById('pvtFinca').value;
+    const loteRaw     = document.getElementById('pvtLote').value;
+    const fechaIni    = document.getElementById('pvtFechaIni').value;
+    const fechaFin    = document.getElementById('pvtFechaFin').value;
+    const horaIni     = document.getElementById('pvtHoraIni').value || null;
+    const horaFin     = document.getElementById('pvtHoraFin').value || null;
+    const bomba       = document.getElementById('pvtBomba').value || null;
+    const horIniRaw   = document.getElementById('pvtHorIni').value;
+    const horFinRaw   = document.getElementById('pvtHorFin').value;
+    const vueltasRaw  = document.getElementById('pvtVueltas').value;
+    const haRaw       = document.getElementById('pvtHa').value;
+    const obs         = document.getElementById('pvtObs').value.trim() || null;
+    const tipoOp      = window.__pvtTipoOp;
+    const tam         = window.__pvtTam;
+    const pct         = window.__pvtPct;
+    const prog        = window.__pivoteProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)    throw new Error('Selecciona una finca');
+    if(!loteRaw)  throw new Error('Selecciona un lote');
+    if(!fechaIni) throw new Error('Indica la fecha de inicio');
+    if(!tipoOp)   throw new Error('Indica el tipo de operación (pivote / rebombeo)');
+    if(!tam)      throw new Error('Indica el tamaño del pivote');
+
+    const lote = parseInt(loteRaw);
+    const horIni = horIniRaw === '' ? null : parseFloat(horIniRaw);
+    const horFin = horFinRaw === '' ? null : parseFloat(horFinRaw);
+    const vueltas = vueltasRaw === '' ? null : parseFloat(vueltasRaw);
+    const ha = haRaw === '' ? null : parseFloat(haRaw);
+
+    if(horIni !== null && (isNaN(horIni) || horIni < 0))
+      throw new Error('Horómetro inicio inválido');
+    if(horFin !== null && (isNaN(horFin) || horFin < 0))
+      throw new Error('Horómetro fin inválido');
+    if(vueltas !== null && (isNaN(vueltas) || vueltas < 0))
+      throw new Error('Número de vueltas inválido');
+    if(ha !== null && (isNaN(ha) || ha < 0))
+      throw new Error('HA regadas inválido');
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote,
+      fecha_inicio: fechaIni,
+      fecha_fin: fechaFin || fechaIni,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      codigo_bomba: bomba,
+      tipo_pivote_op: tipoOp,
+      tipo_pivote_tam: tam,
+      horometro_ini: horIni,
+      horometro_fin: horFin,
+      numero_vueltas: vueltas,
+      pct_trabajo: pct,
+      ha_regadas: ha,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    const { error: e1 } = await sb.from('avc_riego_pivote').insert(payload);
+    if(e1) throw new Error(e1.message);
+
+    if(esProgramada){
+      const updates = {
+        estado: 'completada',
+        ha_real: ha,
+        observacion_real: obs,
+        cerrado_por: usuario.email,
+        cerrado_en: new Date().toISOString()
+      };
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update(updates)
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Pivote registrado y tarea completada' : 'Pivote registrado correctamente');
+    closeModal();
+    window.__pivoteProgramacion = null;
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar registro';
+  }
+}
+
+
+
+/* ============================================================
+   CAPTURA: RIEGO POR ASPERSIÓN (cód. 10601)
+============================================================ */
+
+// Cache de bombas de aspersión y causas de tiempo perdido
+let bombasAspersionCache = null;
+let causasTiempoPerdidoCache = null;
+
+async function cargarBombasAspersion(){
+  if(bombasAspersionCache) return bombasAspersionCache;
+  const { data, error } = await sb.from('pm_bombas')
+    .select('codigo, nombre, energia')
+    .eq('aplica_aspersion', true)
+    .eq('activa', true)
+    .order('codigo');
+  if(error){ console.error('Error cargando bombas aspersion:', error); return []; }
+  bombasAspersionCache = data || [];
+  return bombasAspersionCache;
+}
+
+async function cargarCausasTiempoPerdido(){
+  if(causasTiempoPerdidoCache) return causasTiempoPerdidoCache;
+  const { data, error } = await sb.from('pm_causas_tiempo_perdido')
+    .select('id, codigo, nombre, aplica_aspersion')
+    .eq('activa', true)
+    .eq('aplica_aspersion', true)
+    .order('nombre');
+  if(error){ console.error('Error cargando causas:', error); return []; }
+  causasTiempoPerdidoCache = data || [];
+  return causasTiempoPerdidoCache;
+}
+
+async function abrirCapturaAspersion(programacion){
+  const esProgramada = !!programacion;
+  window.__aspProgramacion = programacion || null;
+  window.__aspTiemposPerdidos = []; // array de {causa_id, minutos, observaciones}
+
+  const bombas = await cargarBombasAspersion();
+  if(bombas.length === 0){
+    toast('No hay bombas de aspersión configuradas. Pide al admin que las cargue.', 'error');
+    return;
+  }
+  await cargarCausasTiempoPerdido();
+
+  // Resolver finca/lote
+  let preFinca = '';
+  let preLote = '';
+  let preFincaDescripcion = '';
+  let preArea = null;
+  if(esProgramada){
+    const fLote = programacion.finca_lote;
+    const reg = plantios.find(p => p.finca_lote === fLote);
+    if(reg){
+      preFincaDescripcion = reg.descripcion_finca;
+      preFinca = reg.descripcion_finca;
+      preArea = reg.area_ha;
+    } else {
+      const { data } = await sb.from('maestro_plantios')
+        .select('descripcion_finca, lote, area_ha')
+        .eq('finca_lote', fLote)
+        .maybeSingle();
+      if(data){
+        preFincaDescripcion = data.descripcion_finca;
+        preFinca = data.descripcion_finca;
+        preLote = data.lote;
+        preArea = data.area_ha;
+      }
+    }
+    if(!preLote){
+      const m = fLote.match(/\d+$/);
+      preLote = m ? parseInt(m[0]) : '';
+    }
+  }
+
+  const fincasUnicas = [...new Set(plantios.map(p => p.descripcion_finca))]
+    .filter(Boolean).sort();
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${preFincaDescripcion || programacion.finca_lote}</strong> · Lote ${preLote}${preArea ? ` (${preArea} ha)` : ''}
+      </div>
+      ${programacion.ha_plan ? `<div style="font-size:12px;color:#185FA5;margin-top:2px">Plan: ${programacion.ha_plan} ha · ${programacion.personal_plan || 0} personas</div>` : ''}
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">Registro espontáneo, fuera del plan diario</div>
+    </div>
+  `;
+
+  const bloqueFincaLote = esProgramada ? `
+    <div class="field">
+      <label>Finca</label>
+      <input type="text" value="${preFincaDescripcion || programacion.finca_lote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <input type="text" value="Lote ${preLote}" disabled style="background:#F4F6F4;color:#374151"/>
+    </div>
+    <input type="hidden" id="aspFinca" value="${preFinca}"/>
+    <input type="hidden" id="aspLote" value="${preLote}"/>
+  ` : `
+    <div class="field">
+      <label>Finca</label>
+      <select id="aspFinca" onchange="actualizarLotesAspersion()">
+        <option value="">Seleccionar...</option>
+        ${fincasUnicas.map(f => `<option value="${f}">${f}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Lote</label>
+      <select id="aspLote"><option value="">Primero elige finca</option></select>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Riego por aspersión</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. 10601</div>
+    ${contextoBanner}
+    ${bloqueFincaLote}
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha inicio</label>
+        <input type="date" id="aspFechaIni" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Fecha fin</label>
+        <input type="date" id="aspFechaFin" value="${hoyISO()}"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="aspHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="aspHoraFin"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>HA regadas</label>
+        <input type="number" step="0.01" id="aspHa" placeholder="0.00" value="${esProgramada && programacion.ha_plan ? programacion.ha_plan : ''}" onchange="calcularCumplimientoAsp()"/>
+      </div>
+      <div class="field">
+        <label>Cant. personas</label>
+        <input type="number" id="aspPersonas" placeholder="0" value="${esProgramada && programacion.personal_plan ? programacion.personal_plan : ''}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Bomba</label>
+      <select id="aspBomba" onchange="actualizarEnergiaAsp()">
+        <option value="">Seleccionar bomba...</option>
+        ${bombas.map(b => `<option value="${b.codigo}" data-energia="${b.energia || ''}">${b.codigo}${b.nombre ? ' · '+b.nombre : ''}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Tipo de energía</label>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="asp-en-btn" data-val="diesel" onclick="seleccionarEnergiaAsp('diesel')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Diesel
+        </button>
+        <button type="button" class="asp-en-btn" data-val="electrica" onclick="seleccionarEnergiaAsp('electrica')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Eléctrica
+        </button>
+        <button type="button" class="asp-en-btn" data-val="mixta" onclick="seleccionarEnergiaAsp('mixta')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Mixta
+        </button>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Horómetro inicio</label>
+        <input type="number" step="0.01" id="aspHorIni" placeholder="0.00"/>
+      </div>
+      <div class="field">
+        <label>Horómetro fin</label>
+        <input type="number" step="0.01" id="aspHorFin" placeholder="0.00"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Horas programadas</label>
+        <input type="number" step="0.01" id="aspHorasProg" placeholder="0.00" value="${esProgramada && programacion.horas_estimadas ? programacion.horas_estimadas : ''}" onchange="calcularCumplimientoAsp()"/>
+      </div>
+      <div class="field">
+        <label>% cumplimiento</label>
+        <input type="text" id="aspPctCump" placeholder="—" disabled style="background:#F4F6F4;color:#374151;font-weight:600"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>N° riego</label>
+        <input type="number" id="aspNumRiego" placeholder="0"/>
+      </div>
+      <div class="field">
+        <label>N° cambios</label>
+        <input type="number" id="aspNumCambios" placeholder="0"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>N° aspersores</label>
+        <input type="number" id="aspNumAsp" placeholder="0"/>
+      </div>
+      <div class="field">
+        <label>RPM</label>
+        <input type="number" step="0.01" id="aspRpm" placeholder="0.00"/>
+      </div>
+    </div>
+
+    <!-- BLOQUE TIEMPO PERDIDO -->
+    <div style="background:#FEF3F2;border:1px dashed #F87171;border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;color:#7F1D1D;text-transform:uppercase;letter-spacing:0.04em">
+          <i class="ti ti-clock-pause"></i> Tiempo perdido
+        </div>
+        <button type="button" onclick="agregarTiempoPerdidoAsp()"
+                style="padding:4px 10px;background:white;border:1px solid #F87171;color:#7F1D1D;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer">
+          + Agregar
+        </button>
+      </div>
+      <div id="aspTiempoPerdidoLista" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div id="aspTiempoPerdidoVacio" style="font-size:11px;color:#7F1D1D;opacity:0.6;text-align:center;padding:6px">
+        Sin tiempo perdido registrado
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="aspObs" placeholder="Condiciones, ajustes..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnAsp" onclick="guardarRiegoAspersion()">
+      <i class="ti ti-device-floppy"></i> Guardar registro
+    </button>
+  `;
+
+  window.__aspEnergia = null;
+
+  showModal();
+}
+
+async function actualizarLotesAspersion(){
+  const finca = document.getElementById('aspFinca').value;
+  const sel = document.getElementById('aspLote');
+  if(!finca){
+    sel.innerHTML = '<option value="">Primero elige finca</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Cargando lotes...</option>';
+
+  const { data: lotes, error } = await sb.from('maestro_plantios')
+    .select('lote')
+    .eq('descripcion_finca', finca)
+    .order('lote');
+
+  if(error){
+    sel.innerHTML = '<option value="">Error</option>';
+    toast('Error: ' + error.message, 'error');
+    return;
+  }
+
+  const lotesUnicos = [...new Set((lotes || []).map(p => p.lote))].filter(l => l != null);
+  if(lotesUnicos.length === 0){
+    sel.innerHTML = '<option value="">No hay lotes</option>';
+    return;
+  }
+  sel.innerHTML = `<option value="">Seleccionar lote...</option>` +
+    lotesUnicos.map(l => `<option value="${l}">Lote ${l}</option>`).join('');
+}
+
+function actualizarEnergiaAsp(){
+  // Al elegir bomba, si tiene energía conocida, auto-seleccionar
+  const sel = document.getElementById('aspBomba');
+  const opt = sel.options[sel.selectedIndex];
+  if(!opt) return;
+  const energia = opt.getAttribute('data-energia');
+  if(energia){
+    seleccionarEnergiaAsp(energia);
+  }
+}
+
+function seleccionarEnergiaAsp(val){
+  window.__aspEnergia = val;
+  document.querySelectorAll('.asp-en-btn').forEach(b => {
+    const sel = b.dataset.val === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+}
+
+function calcularCumplimientoAsp(){
+  // % cumplimiento = (horas reales / horas programadas) * 100 (si lo definimos así)
+  // O alternativamente: (ha_regadas / ha_plan) * 100
+  // Usamos HA porque es más estándar
+  const haRaw = document.getElementById('aspHa').value;
+  const prog = window.__aspProgramacion;
+  const haPlan = prog && prog.ha_plan ? parseFloat(prog.ha_plan) : null;
+  const ha = parseFloat(haRaw);
+  const lbl = document.getElementById('aspPctCump');
+  if(!isNaN(ha) && haPlan && haPlan > 0){
+    const pct = (ha / haPlan) * 100;
+    lbl.value = pct.toFixed(1) + '%';
+  } else {
+    lbl.value = '—';
+  }
+}
+
+function agregarTiempoPerdidoAsp(){
+  const causas = causasTiempoPerdidoCache || [];
+  if(causas.length === 0){
+    toast('No hay causas configuradas', 'error');
+    return;
+  }
+  const idx = window.__aspTiemposPerdidos.length;
+  window.__aspTiemposPerdidos.push({ causa_id: null, minutos: null, observaciones: '' });
+
+  const lista = document.getElementById('aspTiempoPerdidoLista');
+  const vacio = document.getElementById('aspTiempoPerdidoVacio');
+  vacio.style.display = 'none';
+
+  const item = document.createElement('div');
+  item.style.cssText = 'background:white;border:1px solid #F87171;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px';
+  item.id = 'aspTp-' + idx;
+  item.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center">
+      <select onchange="window.__aspTiemposPerdidos[${idx}].causa_id = this.value ? parseInt(this.value) : null"
+              style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px">
+        <option value="">Causa...</option>
+        ${causas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+      </select>
+      <input type="number" placeholder="min"
+             onchange="window.__aspTiemposPerdidos[${idx}].minutos = this.value === '' ? null : parseFloat(this.value)"
+             style="width:70px;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px"/>
+      <button type="button" onclick="quitarTiempoPerdidoAsp(${idx})"
+              style="padding:6px 8px;background:white;border:1px solid #F87171;color:#7F1D1D;border-radius:6px;font-size:11px;cursor:pointer">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+    <input type="text" placeholder="Observación (opcional)"
+           onchange="window.__aspTiemposPerdidos[${idx}].observaciones = this.value"
+           style="padding:6px 8px;border:1px solid #E5E7EB;border-radius:6px;font-size:11px"/>
+  `;
+  lista.appendChild(item);
+}
+
+function quitarTiempoPerdidoAsp(idx){
+  // Marcar como nulo (lo filtramos al guardar)
+  window.__aspTiemposPerdidos[idx] = null;
+  const el = document.getElementById('aspTp-' + idx);
+  if(el) el.remove();
+  // Si todos están vacíos, mostrar el placeholder
+  const algunoVivo = window.__aspTiemposPerdidos.some(t => t !== null);
+  if(!algunoVivo){
+    document.getElementById('aspTiempoPerdidoVacio').style.display = '';
+  }
+}
+
+async function guardarRiegoAspersion(){
+  const btn = document.getElementById('btnAsp');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca       = document.getElementById('aspFinca').value;
+    const loteRaw     = document.getElementById('aspLote').value;
+    const fechaIni    = document.getElementById('aspFechaIni').value;
+    const fechaFin    = document.getElementById('aspFechaFin').value;
+    const horaIni     = document.getElementById('aspHoraIni').value || null;
+    const horaFin     = document.getElementById('aspHoraFin').value || null;
+    const haRaw       = document.getElementById('aspHa').value;
+    const personasRaw = document.getElementById('aspPersonas').value;
+    const bomba       = document.getElementById('aspBomba').value || null;
+    const horIniRaw   = document.getElementById('aspHorIni').value;
+    const horFinRaw   = document.getElementById('aspHorFin').value;
+    const horasProgRaw= document.getElementById('aspHorasProg').value;
+    const pctCumpStr  = document.getElementById('aspPctCump').value;
+    const numRiegoRaw = document.getElementById('aspNumRiego').value;
+    const numCambRaw  = document.getElementById('aspNumCambios').value;
+    const numAspRaw   = document.getElementById('aspNumAsp').value;
+    const rpmRaw      = document.getElementById('aspRpm').value;
+    const obs         = document.getElementById('aspObs').value.trim() || null;
+    const energia     = window.__aspEnergia;
+    const prog        = window.__aspProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)    throw new Error('Selecciona una finca');
+    if(!loteRaw)  throw new Error('Selecciona un lote');
+    if(!fechaIni) throw new Error('Indica la fecha de inicio');
+
+    const lote = parseInt(loteRaw);
+    const ha = haRaw === '' ? null : parseFloat(haRaw);
+    const personas = personasRaw === '' ? null : parseInt(personasRaw);
+    const horIni = horIniRaw === '' ? null : parseFloat(horIniRaw);
+    const horFin = horFinRaw === '' ? null : parseFloat(horFinRaw);
+    const horasProg = horasProgRaw === '' ? null : parseFloat(horasProgRaw);
+    const numRiego = numRiegoRaw === '' ? null : parseInt(numRiegoRaw);
+    const numCamb = numCambRaw === '' ? null : parseInt(numCambRaw);
+    const numAsp = numAspRaw === '' ? null : parseInt(numAspRaw);
+    const rpm = rpmRaw === '' ? null : parseFloat(rpmRaw);
+
+    let pctCump = null;
+    if(pctCumpStr && pctCumpStr !== '—'){
+      pctCump = parseFloat(pctCumpStr.replace('%',''));
+      if(isNaN(pctCump)) pctCump = null;
+    }
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote,
+      fecha_inicio: fechaIni,
+      fecha_fin: fechaFin || fechaIni,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      ha_regadas: ha,
+      codigo_bomba: bomba,
+      energia,
+      horometro_ini: horIni,
+      horometro_fin: horFin,
+      horas_programadas: horasProg,
+      pct_cumplimiento: pctCump,
+      numero_riego: numRiego,
+      numero_cambios: numCamb,
+      numero_aspersores: numAsp,
+      rpm,
+      cant_personas: personas,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    // 1) Insertar el riego principal y recuperar el id
+    const { data: insertados, error: e1 } = await sb.from('avc_riego_aspersion')
+      .insert(payload)
+      .select('id')
+      .single();
+    if(e1) throw new Error(e1.message);
+    const aspersionId = insertados.id;
+
+    // 2) Insertar tiempos perdidos asociados (si hay)
+    const tiempos = (window.__aspTiemposPerdidos || [])
+      .filter(t => t !== null && t.causa_id && t.minutos != null && t.minutos > 0)
+      .map(t => ({
+        tipo_riego: 'aspersion',
+        riego_id: aspersionId,
+        causa_id: t.causa_id,
+        minutos: t.minutos,
+        observaciones: t.observaciones || null
+      }));
+    if(tiempos.length > 0){
+      const { error: eTp } = await sb.from('avc_riego_tiempo_perdido').insert(tiempos);
+      if(eTp) console.warn('Error guardando tiempos perdidos:', eTp);
+    }
+
+    // 3) Si era programada, cerrar la tarea
+    if(esProgramada){
+      const updates = {
+        estado: 'completada',
+        ha_real: ha,
+        personal_real: personas,
+        observacion_real: obs,
+        cerrado_por: usuario.email,
+        cerrado_en: new Date().toISOString()
+      };
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update(updates)
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Aspersión registrada y tarea completada' : 'Aspersión registrada correctamente');
+    closeModal();
+    window.__aspProgramacion = null;
+    window.__aspTiemposPerdidos = [];
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar registro';
+  }
+}
+
+
+
+/* ============================================================
+   CAPTURA LIBRE Y HISTORIAL DEL DIGITADOR
+============================================================ */
+async function renderDigitadorRiegosCapturaLibre(){
+  return `
+    <div class="banner amber">
+      <div class="banner-lbl">Captura libre</div>
+      <div class="banner-txt">Registros sin programación previa</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Medición de caudales</div>
+      <button class="btn btn-primary" onclick="abrirCapturaCaudales()">
+        <i class="ti ti-wave-saw-tool"></i> Registrar caudal
+      </button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Riego por gravedad</div>
+      <button class="btn btn-primary" onclick="abrirCapturaGravedad()">
+        <i class="ti ti-droplet"></i> Registrar riego gravedad
+      </button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Drenajes</div>
+      <button class="btn btn-primary" onclick="abrirCapturaDrenajes()">
+        <i class="ti ti-tractor"></i> Registrar drenaje
+      </button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Riego por pivote</div>
+      <button class="btn btn-primary" onclick="abrirCapturaPivote()">
+        <i class="ti ti-360"></i> Registrar riego pivote
+      </button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Riego por aspersión</div>
+      <button class="btn btn-primary" onclick="abrirCapturaAspersion()">
+        <i class="ti ti-shower"></i> Registrar riego aspersión
+      </button>
+    </div>
+  `;
+}
+
+async function renderDigitadorRiegosHistorial(){
+  // Historial unificado: caudales + gravedad + drenajes + pivote + aspersión
+  const [caudR, gravR, drnR, pvtR, aspR] = await Promise.all([
+    sb.from('avc_riego_caudales')
+      .select('*, pm_fuentes_agua(nombre, tipo, unidad)')
+      .eq('registrado_por', usuario.email)
+      .order('fecha', { ascending: false })
+      .order('hora', { ascending: false })
+      .limit(30),
+    sb.from('avc_riego_gravedad')
+      .select('*')
+      .eq('registrado_por', usuario.email)
+      .order('fecha_inicio', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30),
+    sb.from('avc_riego_drenajes')
+      .select('*, pm_tipos_drenaje(nombre, es_mecanizado), pm_tipos_maquinaria_drenaje(nombre), pm_actividades_drenaje(nombre)')
+      .eq('registrado_por', usuario.email)
+      .order('fecha', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30),
+    sb.from('avc_riego_pivote')
+      .select('*')
+      .eq('registrado_por', usuario.email)
+      .order('fecha_inicio', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30),
+    sb.from('avc_riego_aspersion')
+      .select('*')
+      .eq('registrado_por', usuario.email)
+      .order('fecha_inicio', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30)
+  ]);
+
+  if(caudR.error || gravR.error || drnR.error || pvtR.error || aspR.error){
+    const msg = (caudR.error || gravR.error || drnR.error || pvtR.error || aspR.error).message;
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${msg}</div>`;
+  }
+
+  // Normalizar a un formato común para ordenar por fecha
+  const items = [];
+
+  (caudR.data || []).forEach(r => {
+    const f = r.pm_fuentes_agua || {};
+    const unidadLabel = (r.unidad === 'metros_cubicos') ? 'm³' : 'gal/min';
+    const tipoLabel = f.tipo === 'rio' ? 'Río' : f.tipo === 'canal' ? 'Canal' : f.tipo === 'laguna' ? 'Laguna' : '';
+    items.push({
+      sortDate: r.fecha + ' ' + (r.hora || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('caudales', ${r.id})">
+        <div class="reg-head">
+          <span class="badge">Caudal · ${tipoLabel}</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha)}${r.hora ? ' · '+r.hora.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${f.nombre || '—'}</div>
+        <div class="reg-meta"><strong>${r.valor_medido}</strong> ${unidadLabel}</div>
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  (gravR.data || []).forEach(r => {
+    items.push({
+      sortDate: r.fecha_inicio + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('gravedad', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#E6F1FB;color:#0C447C">Gravedad</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha_inicio)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${r.finca} · Lote ${r.lote}</div>
+        <div class="reg-meta">${r.ha_regadas != null ? `<strong>${r.ha_regadas}</strong> ha · ` : ''}${r.personal != null ? `${r.personal} personas` : ''}${r.tiempo_agua_lote != null ? ` · ${r.tiempo_agua_lote} h de agua` : ''}</div>
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  (drnR.data || []).forEach(r => {
+    const tipo = r.pm_tipos_drenaje || {};
+    const maq = r.pm_tipos_maquinaria_drenaje || {};
+    const act = r.pm_actividades_drenaje || {};
+    const detalleMec = (tipo.es_mecanizado && maq.nombre)
+      ? ` · ${maq.nombre} (${r.propio_alquilado || '—'})`
+      : '';
+    items.push({
+      sortDate: r.fecha + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('drenajes', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#FBF1E0;color:#8A4B07">Drenaje</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${r.finca} · Lote ${r.lote}</div>
+        <div class="reg-meta">${tipo.nombre || ''}${detalleMec}${r.metros_avance != null ? ` · <strong>${r.metros_avance}</strong> mts` : ''}</div>
+        ${act.nombre ? `<div style="font-size:11px;color:#6b7280;margin-top:2px">${act.nombre}</div>` : ''}
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  (pvtR.data || []).forEach(r => {
+    const tamLabel = r.tipo_pivote_tam === 'pequeno' ? 'Pequeño' :
+                     r.tipo_pivote_tam === 'mediano' ? 'Mediano' :
+                     r.tipo_pivote_tam === 'grande'  ? 'Grande' : '';
+    const opLabel = r.tipo_pivote_op === 'pivote' ? 'Pivote' :
+                    r.tipo_pivote_op === 'rebombeo' ? 'Rebombeo' : '';
+    items.push({
+      sortDate: r.fecha_inicio + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('pivote', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#EDE5F8;color:#5B279C">Pivote</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha_inicio)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${r.finca} · Lote ${r.lote}</div>
+        <div class="reg-meta">
+          ${opLabel}${tamLabel ? ' · '+tamLabel : ''}${r.codigo_bomba ? ' · Bomba '+r.codigo_bomba : ''}
+          ${r.ha_regadas != null ? ` · <strong>${r.ha_regadas}</strong> ha` : ''}
+          ${r.pct_trabajo ? ` · ${r.pct_trabajo}%` : ''}
+        </div>
+        ${r.numero_vueltas != null ? `<div style="font-size:11px;color:#6b7280;margin-top:2px">${r.numero_vueltas} vueltas</div>` : ''}
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  (aspR.data || []).forEach(r => {
+    items.push({
+      sortDate: r.fecha_inicio + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('aspersion', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#DBEAFE;color:#1E40AF">Aspersión</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha_inicio)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${r.finca} · Lote ${r.lote}</div>
+        <div class="reg-meta">
+          ${r.ha_regadas != null ? `<strong>${r.ha_regadas}</strong> ha` : ''}
+          ${r.codigo_bomba ? ` · Bomba ${r.codigo_bomba}` : ''}
+          ${r.energia ? ` · ${r.energia}` : ''}
+          ${r.pct_cumplimiento != null ? ` · ${r.pct_cumplimiento}% cumpl.` : ''}
+        </div>
+        ${r.numero_aspersores != null || r.numero_cambios != null ? `<div style="font-size:11px;color:#6b7280;margin-top:2px">${r.numero_aspersores != null ? r.numero_aspersores+' aspersores' : ''}${r.numero_cambios != null ? (r.numero_aspersores != null ? ' · ' : '')+r.numero_cambios+' cambios' : ''}${r.cant_personas != null ? ' · '+r.cant_personas+' personas' : ''}</div>` : ''}
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  if(items.length === 0){
+    return '<div class="empty"><i class="ti ti-file-text"></i>Aún no tienes registros.</div>';
+  }
+
+  items.sort((a,b) => b.sortDate.localeCompare(a.sortDate));
+  return items.map(i => i.html).join('');
+}
+
+
+/* ============================================================
+   VISTA: OPERADOR DE RIEGOS
+   Captura: riego goteo (10701) y lavado de filtros (10705).
+   Cada operador está asignado a UNA estación (user_perfiles.estacion_default).
+============================================================ */
+
+async function renderOperadorRiegos(){
+  const tabs = [
+    {id:'tareas',    label:'Tareas'},
+    {id:'libre',     label:'Captura libre'},
+    {id:'historial', label:'Historial'}
+  ];
+  if(!currentTab) currentTab = 'tareas';
+
+  renderHeader();
+
+  let body = '';
+  if(currentTab === 'tareas')          body = await renderOperadorRiegosTareas();
+  else if(currentTab === 'libre')      body = await renderOperadorRiegosCapturaLibre();
+  else if(currentTab === 'historial')  body = await renderOperadorRiegosHistorial();
+  else                                 body = await renderOperadorRiegosTareas();
+
+  document.getElementById('appBody').innerHTML = `
+    ${renderTabs(tabs)}
+    <div class="sec active">${body}</div>
+  `;
+}
+
+async function renderOperadorRiegosTareas(){
+  const hoy = hoyISO();
+
+  // Obtener el nombre de la estación del operador (para el banner)
+  let nombreEstacion = '';
+  if(usuario.estacion_default){
+    const { data: est } = await sb.from('pm_estaciones_riego')
+      .select('nombre').eq('id', usuario.estacion_default).maybeSingle();
+    if(est) nombreEstacion = est.nombre;
+  }
+
+  const { data: tareas, error } = await sb.from('avc_programacion')
+    .select('*')
+    .eq('email_supervisor', usuario.email)
+    .eq('fecha', hoy)
+    .eq('eliminada', false)
+    .neq('estado', 'solicitud_pm')
+    .order('hora_programada', { nullsFirst: false });
+
+  if(error){
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${error.message}</div>`;
+  }
+
+  const total = (tareas || []).length;
+  const compl = (tareas || []).filter(t => t.estado === 'completada' || t.estado === 'modificada').length;
+  const pend  = (tareas || []).filter(t => t.estado === 'planificado' || t.estado === 'pendiente').length;
+
+  let html = `
+    <div class="banner blue">
+      <div class="banner-lbl">${nombreEstacion || 'Operador de riegos'}</div>
+      <div class="banner-txt">${total} tarea${total!==1?'s':''} asignada${total!==1?'s':''} hoy</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-lbl">Total</div><div class="stat-val">${total}</div></div>
+      <div class="stat"><div class="stat-lbl">Compl.</div><div class="stat-val ok">${compl}</div></div>
+      <div class="stat"><div class="stat-lbl">Pend.</div><div class="stat-val">${pend}</div></div>
+    </div>
+  `;
+
+  if(total === 0){
+    html += `<div class="empty"><i class="ti ti-calendar-off"></i>Sin tareas asignadas hoy. Puedes registrar un riego espontáneo desde "Captura libre".</div>`;
+    return html;
+  }
+
+  tareas.forEach(t => {
+    const ico = iconoActividad(t.codigo_actividad);
+    const prio = t.prioridad === 'alta' ? '<span class="badge b-prio-alta">ALTA</span>' :
+                 t.prioridad === 'baja' ? '<span class="badge b-prio-baja">BAJA</span>' : '';
+    let metaTxt = '';
+    if(t.estado === 'planificado' || t.estado === 'pendiente'){
+      metaTxt = `Pendiente de registro`;
+    } else if(t.estado === 'completada' || t.estado === 'modificada'){
+      metaTxt = `Completada`;
+    } else {
+      metaTxt = t.estado;
+    }
+    const turnoTxt = t.turno ? ` · TURNO ${t.turno}` : '';
+    html += `<div class="tarea-card estado-${t.estado}" onclick="abrirTareaOperadorRiegos(${t.id})">
+      <div class="tarea-head">
+        <div class="tarea-left">
+          <div class="tarea-icon ${ico.color}"><i class="ti ${ico.icon}"></i></div>
+          <div class="tarea-info">
+            ${t.hora_programada ? `<div class="tarea-hora">${t.hora_programada}</div>` : ''}
+            <div class="tarea-title">${actNombre(t.codigo_actividad)}${turnoTxt}</div>
+          </div>
+        </div>
+        <div class="tarea-tags">${badge(t.estado)}${prio}</div>
+      </div>
+      <div class="tarea-sub">${t.finca_lote || '—'}</div>
+      <div class="tarea-meta">${metaTxt}</div>
+    </div>`;
+  });
+
+  return html;
+}
+
+async function abrirTareaOperadorRiegos(progId){
+  const { data: t, error } = await sb.from('avc_programacion')
+    .select('*').eq('id', progId).maybeSingle();
+  if(error || !t){
+    toast('No se pudo cargar la tarea', 'error');
+    return;
+  }
+
+  if(t.estado === 'completada' || t.estado === 'modificada'){
+    toast('Esta tarea ya fue completada', 'info');
+    return;
+  }
+
+  const act = actividadesAll.find(a => a.codigo_actividad === t.codigo_actividad);
+  if(!act){
+    toast('Actividad no encontrada en catálogo', 'error');
+    return;
+  }
+
+  if(act.requiere_detalle === 'avc_riego_goteo'){
+    return abrirCapturaGoteo(t);
+  }
+  if(act.requiere_detalle === 'avc_riego_reparacion_goteo'){
+    return abrirCapturaReparacionGoteo(t);
+  }
+  toast('Tipo de actividad no manejado: ' + (act.requiere_detalle || 'sin tabla detalle'), 'error');
+}
+
+
+/* ============================================================
+   CAPTURA: RIEGO GOTEO (cód. 10701, 10705)
+============================================================ */
+
+// Caches
+let bombasGoteoCache = null;
+let tiposRiegoGoteoCache = null;
+let fincasEstacionCache = null;  // fincas de la estación del operador
+
+async function cargarBombasGoteo(){
+  if(bombasGoteoCache) return bombasGoteoCache;
+  const { data, error } = await sb.from('pm_bombas')
+    .select('codigo, nombre, energia, estacion_id')
+    .eq('aplica_goteo', true)
+    .eq('activa', true)
+    .order('codigo');
+  // Como no hay bombas marcadas con aplica_goteo=true por defecto,
+  // este resultado va a venir vacío. El operador puede dejar bomba en blanco
+  // o el admin puede después marcar bombas como aplica_goteo.
+  bombasGoteoCache = (error ? [] : (data || []));
+  return bombasGoteoCache;
+}
+
+async function cargarTiposRiegoGoteo(){
+  if(tiposRiegoGoteoCache) return tiposRiegoGoteoCache;
+  const { data, error } = await sb.from('pm_tipos_riego_goteo')
+    .select('id, codigo, nombre, requiere_producto')
+    .eq('activo', true)
+    .order('id');
+  tiposRiegoGoteoCache = (error ? [] : (data || []));
+  return tiposRiegoGoteoCache;
+}
+
+async function cargarFincasEstacion(estacionId){
+  // Cache por estación
+  if(fincasEstacionCache && fincasEstacionCache._estacionId === estacionId)
+    return fincasEstacionCache.data;
+  const { data, error } = await sb.from('pm_estacion_fincas')
+    .select('finca_nombre')
+    .eq('estacion_id', estacionId)
+    .order('finca_nombre');
+  const result = error ? [] : (data || []).map(r => r.finca_nombre);
+  fincasEstacionCache = { _estacionId: estacionId, data: result };
+  return result;
+}
+
+async function abrirCapturaGoteo(programacion){
+  const esProgramada = !!programacion;
+  window.__goteoProgramacion = programacion || null;
+  window.__goteoTiemposPerdidos = [];
+
+  // Determinar la estación del operador
+  const estacionId = usuario.estacion_default;
+  if(!estacionId){
+    toast('Tu usuario no tiene estación asignada. Pide al admin que la configure.', 'error');
+    return;
+  }
+
+  // Cargar nombre de la estación
+  const { data: est } = await sb.from('pm_estaciones_riego')
+    .select('id, nombre, codigo').eq('id', estacionId).maybeSingle();
+  if(!est){
+    toast('Estación no encontrada', 'error');
+    return;
+  }
+
+  const [bombas, tipos, fincasEst] = await Promise.all([
+    cargarBombasGoteo(),
+    cargarTiposRiegoGoteo(),
+    cargarFincasEstacion(estacionId),
+    cargarCausasTiempoPerdido()
+  ]);
+
+  if(fincasEst.length === 0){
+    toast('No hay fincas configuradas en tu estación. Pide al admin que las agregue.', 'error');
+    return;
+  }
+
+  // Resolver finca/turno desde la programación
+  let preFinca = '';
+  let preTurno = '';
+  if(esProgramada){
+    preTurno = programacion.turno || '';
+    const fLote = programacion.finca_lote || '';
+    // Intentar deducir la finca del finca_lote
+    // finca_lote suele venir como "AGRICASA01" - extraer la parte alfa
+    const m = fLote.match(/^([A-ZÁÉÍÓÚÑ\s]+)/i);
+    if(m){
+      const fincaCandidata = m[1].trim().toUpperCase();
+      // buscar coincidencia en fincasEst
+      const match = fincasEst.find(f => f.toUpperCase() === fincaCandidata);
+      if(match) preFinca = match;
+    }
+  }
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">
+        <strong>${est.nombre}</strong>${preTurno ? ` · TURNO ${preTurno}` : ''}
+      </div>
+      ${preFinca ? `<div style="font-size:12px;color:#185FA5;margin-top:2px">Finca: ${preFinca}</div>` : ''}
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">${est.nombre} · Registro fuera de plan</div>
+    </div>
+  `;
+
+  // Selector de finca (siempre editable - dentro de la estación del operador)
+  const fincaSelector = `
+    <div class="field">
+      <label>Finca</label>
+      <select id="gotFinca">
+        <option value="">Seleccionar finca...</option>
+        ${fincasEst.map(f => `<option value="${f}" ${f === preFinca ? 'selected' : ''}>${f}</option>`).join('')}
+      </select>
+    </div>
+  `;
+
+  // Selector de turno (1-6)
+  const turnoSelector = esProgramada && preTurno ? `
+    <div class="field">
+      <label>Turno</label>
+      <input type="text" value="Turno ${preTurno}" disabled style="background:#F4F6F4;color:#374151"/>
+      <input type="hidden" id="gotTurno" value="${preTurno}"/>
+    </div>
+  ` : `
+    <div class="field">
+      <label>Turno</label>
+      <select id="gotTurno">
+        <option value="">Seleccionar turno...</option>
+        ${[1,2,3,4,5,6].map(n => `<option value="${n}">Turno ${n}</option>`).join('')}
+      </select>
+    </div>
+  `;
+
+  // Selector de tipo de riego
+  const tipoSelector = `
+    <div class="field">
+      <label>Tipo de riego</label>
+      <select id="gotTipo" onchange="onCambioTipoGoteo()">
+        <option value="">Seleccionar tipo...</option>
+        ${tipos.map(t => `<option value="${t.id}" data-codigo="${t.codigo}" data-prod="${t.requiere_producto ? '1' : '0'}">${t.nombre}</option>`).join('')}
+      </select>
+    </div>
+  `;
+
+  // Selector de bomba (puede estar vacío)
+  const bombaOpts = bombas.length > 0
+    ? bombas.map(b => `<option value="${b.codigo}" data-energia="${b.energia || ''}">${b.codigo}${b.nombre ? ' · '+b.nombre : ''}</option>`).join('')
+    : '';
+  const bombaSelector = bombas.length > 0 ? `
+    <div class="field">
+      <label>Bomba</label>
+      <select id="gotBomba" onchange="actualizarEnergiaGoteo()">
+        <option value="">Seleccionar bomba...</option>
+        ${bombaOpts}
+      </select>
+    </div>
+  ` : `
+    <div class="field">
+      <label>Bomba</label>
+      <input type="text" id="gotBomba" placeholder="Código de bomba (opcional)"/>
+      <div class="field-help" style="font-size:11px;color:#6b7280;margin-top:4px">No hay bombas configuradas para goteo. Pide al admin que las marque.</div>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Riego por goteo</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. ${esProgramada ? programacion.codigo_actividad : '10701'}</div>
+    ${contextoBanner}
+
+    ${fincaSelector}
+    ${turnoSelector}
+
+    <div class="field-row">
+      <div class="field">
+        <label>Fecha inicio</label>
+        <input type="date" id="gotFechaIni" value="${hoyISO()}"/>
+      </div>
+      <div class="field">
+        <label>Fecha fin</label>
+        <input type="date" id="gotFechaFin" value="${hoyISO()}"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="gotHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="gotHoraFin"/>
+      </div>
+    </div>
+
+    ${tipoSelector}
+
+    <!-- Producto aplicado (oculto por defecto, aparece si tipo = OTRAS_APLICACIONES) -->
+    <div class="field" id="gotProductoCampo" style="display:none">
+      <label>Producto aplicado</label>
+      <input type="text" id="gotProducto" placeholder="Detalle del producto..."/>
+    </div>
+
+    ${bombaSelector}
+
+    <div class="field">
+      <label>Tipo de energía</label>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button type="button" class="got-en-btn" data-val="diesel" onclick="seleccionarEnergiaGoteo('diesel')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Diesel
+        </button>
+        <button type="button" class="got-en-btn" data-val="electrica" onclick="seleccionarEnergiaGoteo('electrica')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Eléctrica
+        </button>
+        <button type="button" class="got-en-btn" data-val="mixta" onclick="seleccionarEnergiaGoteo('mixta')"
+                style="flex:1;padding:9px;border:1.5px solid #D1D5DB;background:white;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer">
+          Mixta
+        </button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Horas solicitadas <span style="color:#6b7280;font-weight:400">(las que pidió el jefe)</span></label>
+      <input type="number" step="0.01" id="gotHorasSol" placeholder="0.00" value="${esProgramada && programacion.horas_estimadas ? programacion.horas_estimadas : ''}"/>
+    </div>
+
+    <!-- BLOQUE LECTURAS -->
+    <div style="background:#F9FAFB;border:1px dashed #D1D5DB;border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">
+        <i class="ti ti-gauge"></i> Lecturas
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Horómetro inicio</label>
+          <input type="number" step="0.01" id="gotHorIni" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>Horómetro fin</label>
+          <input type="number" step="0.01" id="gotHorFin" placeholder="0.00"/>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>KW inicio</label>
+          <input type="number" step="0.01" id="gotKwIni" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>KW fin</label>
+          <input type="number" step="0.01" id="gotKwFin" placeholder="0.00"/>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Presión entrada</label>
+          <input type="number" step="0.01" id="gotPresEnt" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>Presión salida</label>
+          <input type="number" step="0.01" id="gotPresSal" placeholder="0.00"/>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Caudal inicio</label>
+          <input type="number" step="0.01" id="gotCaudIni" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>Caudal fin</label>
+          <input type="number" step="0.01" id="gotCaudFin" placeholder="0.00"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- BLOQUE TIEMPO PERDIDO -->
+    <div style="background:#FEF3F2;border:1px dashed #F87171;border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;color:#7F1D1D;text-transform:uppercase;letter-spacing:0.04em">
+          <i class="ti ti-clock-pause"></i> Tiempo perdido
+        </div>
+        <button type="button" onclick="agregarTiempoPerdidoGoteo()"
+                style="padding:4px 10px;background:white;border:1px solid #F87171;color:#7F1D1D;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer">
+          + Agregar
+        </button>
+      </div>
+      <div id="gotTiempoPerdidoLista" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div id="gotTiempoPerdidoVacio" style="font-size:11px;color:#7F1D1D;opacity:0.6;text-align:center;padding:6px">
+        Sin tiempo perdido registrado
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="gotObs" placeholder="Condiciones, incidencias..."></textarea>
+    </div>
+
+    <input type="hidden" id="gotEstacionId" value="${estacionId}"/>
+
+    <button class="btn btn-primary" id="btnGot" onclick="guardarRiegoGoteo()">
+      <i class="ti ti-device-floppy"></i> Guardar registro
+    </button>
+  `;
+
+  window.__gotEnergia = null;
+
+  showModal();
+}
+
+function onCambioTipoGoteo(){
+  const sel = document.getElementById('gotTipo');
+  const opt = sel.options[sel.selectedIndex];
+  const reqProd = opt && opt.getAttribute('data-prod') === '1';
+  const campo = document.getElementById('gotProductoCampo');
+  if(campo){
+    campo.style.display = reqProd ? '' : 'none';
+  }
+}
+
+function actualizarEnergiaGoteo(){
+  const sel = document.getElementById('gotBomba');
+  // Si es un <select> con opciones
+  if(sel.tagName === 'SELECT'){
+    const opt = sel.options[sel.selectedIndex];
+    if(!opt) return;
+    const energia = opt.getAttribute('data-energia');
+    if(energia) seleccionarEnergiaGoteo(energia);
+  }
+}
+
+function seleccionarEnergiaGoteo(val){
+  window.__gotEnergia = val;
+  document.querySelectorAll('.got-en-btn').forEach(b => {
+    const sel = b.dataset.val === val;
+    b.style.borderColor = sel ? '#1D9E75' : '#D1D5DB';
+    b.style.background = sel ? '#E8F5EE' : 'white';
+    b.style.color = sel ? '#0F5530' : '#374151';
+    b.style.boxShadow = sel ? '0 0 0 3px rgba(29,158,117,0.18)' : 'none';
+  });
+}
+
+function agregarTiempoPerdidoGoteo(){
+  const causas = (causasTiempoPerdidoCache || []).filter(c => c.aplica_goteo !== false);
+  if(causas.length === 0){
+    toast('No hay causas configuradas', 'error');
+    return;
+  }
+  const idx = window.__goteoTiemposPerdidos.length;
+  window.__goteoTiemposPerdidos.push({ causa_id: null, minutos: null, observaciones: '' });
+
+  const lista = document.getElementById('gotTiempoPerdidoLista');
+  const vacio = document.getElementById('gotTiempoPerdidoVacio');
+  vacio.style.display = 'none';
+
+  const item = document.createElement('div');
+  item.style.cssText = 'background:white;border:1px solid #F87171;border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px';
+  item.id = 'gotTp-' + idx;
+  item.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center">
+      <select onchange="window.__goteoTiemposPerdidos[${idx}].causa_id = this.value ? parseInt(this.value) : null"
+              style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px">
+        <option value="">Causa...</option>
+        ${causas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+      </select>
+      <input type="number" placeholder="min"
+             onchange="window.__goteoTiemposPerdidos[${idx}].minutos = this.value === '' ? null : parseFloat(this.value)"
+             style="width:70px;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px"/>
+      <button type="button" onclick="quitarTiempoPerdidoGoteo(${idx})"
+              style="padding:6px 8px;background:white;border:1px solid #F87171;color:#7F1D1D;border-radius:6px;font-size:11px;cursor:pointer">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+    <input type="text" placeholder="Observación (opcional)"
+           onchange="window.__goteoTiemposPerdidos[${idx}].observaciones = this.value"
+           style="padding:6px 8px;border:1px solid #E5E7EB;border-radius:6px;font-size:11px"/>
+  `;
+  lista.appendChild(item);
+}
+
+function quitarTiempoPerdidoGoteo(idx){
+  window.__goteoTiemposPerdidos[idx] = null;
+  const el = document.getElementById('gotTp-' + idx);
+  if(el) el.remove();
+  const algunoVivo = window.__goteoTiemposPerdidos.some(t => t !== null);
+  if(!algunoVivo){
+    document.getElementById('gotTiempoPerdidoVacio').style.display = '';
+  }
+}
+
+async function guardarRiegoGoteo(){
+  const btn = document.getElementById('btnGot');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const estacionId = parseInt(document.getElementById('gotEstacionId').value);
+    const finca = document.getElementById('gotFinca').value;
+    const turnoRaw = document.getElementById('gotTurno').value;
+    const fechaIni = document.getElementById('gotFechaIni').value;
+    const fechaFin = document.getElementById('gotFechaFin').value;
+    const horaIni = document.getElementById('gotHoraIni').value || null;
+    const horaFin = document.getElementById('gotHoraFin').value || null;
+    const tipoId = document.getElementById('gotTipo').value;
+    const productoRaw = document.getElementById('gotProducto') ? document.getElementById('gotProducto').value : '';
+    const bombaEl = document.getElementById('gotBomba');
+    const bomba = bombaEl ? (bombaEl.value || null) : null;
+    const horasSolRaw = document.getElementById('gotHorasSol').value;
+    const horIniRaw = document.getElementById('gotHorIni').value;
+    const horFinRaw = document.getElementById('gotHorFin').value;
+    const kwIniRaw = document.getElementById('gotKwIni').value;
+    const kwFinRaw = document.getElementById('gotKwFin').value;
+    const presEntRaw = document.getElementById('gotPresEnt').value;
+    const presSalRaw = document.getElementById('gotPresSal').value;
+    const caudIniRaw = document.getElementById('gotCaudIni').value;
+    const caudFinRaw = document.getElementById('gotCaudFin').value;
+    const obs = document.getElementById('gotObs').value.trim() || null;
+    const energia = window.__gotEnergia;
+    const prog = window.__goteoProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca)    throw new Error('Selecciona una finca');
+    if(!turnoRaw) throw new Error('Indica el turno');
+    if(!fechaIni) throw new Error('Indica la fecha de inicio');
+    if(!tipoId)   throw new Error('Selecciona el tipo de riego goteo');
+
+    const turno = parseInt(turnoRaw);
+    const num = (v) => v === '' || v == null ? null : parseFloat(v);
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      estacion_id: estacionId,
+      finca,
+      turno,
+      fecha_inicio: fechaIni,
+      fecha_fin: fechaFin || fechaIni,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      tipo_riego_id: parseInt(tipoId),
+      codigo_bomba: bomba,
+      energia,
+      horas_solicitadas: num(horasSolRaw),
+      horometro_ini: num(horIniRaw),
+      horometro_fin: num(horFinRaw),
+      kw_ini: num(kwIniRaw),
+      kw_fin: num(kwFinRaw),
+      presion_entrada: num(presEntRaw),
+      presion_salida: num(presSalRaw),
+      caudal_ini: num(caudIniRaw),
+      caudal_fin: num(caudFinRaw),
+      producto_aplicado: productoRaw ? productoRaw.trim() : null,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    // 1) Insertar el riego y recuperar id
+    const { data: insertados, error: e1 } = await sb.from('avc_riego_goteo')
+      .insert(payload)
+      .select('id')
+      .single();
+    if(e1) throw new Error(e1.message);
+    const goteoId = insertados.id;
+
+    // 2) Insertar tiempos perdidos
+    const tiempos = (window.__goteoTiemposPerdidos || [])
+      .filter(t => t !== null && t.causa_id && t.minutos != null && t.minutos > 0)
+      .map(t => ({
+        tipo_riego: 'goteo',
+        riego_id: goteoId,
+        causa_id: t.causa_id,
+        minutos: t.minutos,
+        observaciones: t.observaciones || null
+      }));
+    if(tiempos.length > 0){
+      const { error: eTp } = await sb.from('avc_riego_tiempo_perdido').insert(tiempos);
+      if(eTp) console.warn('Error guardando tiempos perdidos:', eTp);
+    }
+
+    // 3) Si era programada, cerrar la tarea
+    if(esProgramada){
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update({
+          estado: 'completada',
+          observacion_real: obs,
+          cerrado_por: usuario.email,
+          cerrado_en: new Date().toISOString()
+        })
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Riego goteo registrado y tarea completada' : 'Riego goteo registrado correctamente');
+    closeModal();
+    window.__goteoProgramacion = null;
+    window.__goteoTiemposPerdidos = [];
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar registro';
+  }
+}
+
+
+/* ============================================================
+   CAPTURA LIBRE Y HISTORIAL DEL OPERADOR_RIEGOS
+============================================================ */
+async function renderOperadorRiegosCapturaLibre(){
+  let nombreEstacion = '';
+  if(usuario.estacion_default){
+    const { data: est } = await sb.from('pm_estaciones_riego')
+      .select('nombre').eq('id', usuario.estacion_default).maybeSingle();
+    if(est) nombreEstacion = est.nombre;
+  }
+  return `
+    <div class="banner amber">
+      <div class="banner-lbl">Captura libre</div>
+      <div class="banner-txt">${nombreEstacion ? nombreEstacion+' · ' : ''}Registros sin programación previa</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Riego por goteo</div>
+      <button class="btn btn-primary" onclick="abrirCapturaGoteo()">
+        <i class="ti ti-droplet-half-2"></i> Registrar riego goteo
+      </button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Reparación de goteo</div>
+      <button class="btn btn-primary" onclick="abrirCapturaReparacionGoteo()">
+        <i class="ti ti-tools"></i> Registrar reparación
+      </button>
+    </div>
+  `;
+}
+
+async function renderOperadorRiegosHistorial(){
+  const [gotR, repR] = await Promise.all([
+    sb.from('avc_riego_goteo')
+      .select('*, pm_estaciones_riego(nombre), pm_tipos_riego_goteo(nombre, requiere_producto)')
+      .eq('registrado_por', usuario.email)
+      .order('fecha_inicio', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30),
+    sb.from('avc_riego_reparacion_goteo')
+      .select('*')
+      .eq('registrado_por', usuario.email)
+      .order('fecha', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .limit(30)
+  ]);
+
+  if(gotR.error || repR.error){
+    const msg = (gotR.error || repR.error).message;
+    return `<div class="empty"><i class="ti ti-alert-triangle"></i>Error: ${msg}</div>`;
+  }
+  if((!gotR.data || gotR.data.length === 0) && (!repR.data || repR.data.length === 0)){
+    return '<div class="empty"><i class="ti ti-file-text"></i>Aún no tienes registros.</div>';
+  }
+
+  const items = [];
+
+  (gotR.data || []).forEach(r => {
+    const est = r.pm_estaciones_riego || {};
+    const tipo = r.pm_tipos_riego_goteo || {};
+    items.push({
+      sortDate: r.fecha_inicio + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('goteo', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#D1FAE5;color:#065F46">Goteo</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha_inicio)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${est.nombre || ''} · ${r.finca}${r.turno ? ' · TURNO '+r.turno : ''}</div>
+        <div class="reg-meta">
+          ${tipo.nombre || ''}
+          ${r.codigo_bomba ? ' · Bomba '+r.codigo_bomba : ''}
+          ${r.energia ? ' · '+r.energia : ''}
+        </div>
+        ${r.producto_aplicado ? `<div style="font-size:11px;color:#6b7280;margin-top:2px">Producto: ${r.producto_aplicado}</div>` : ''}
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  (repR.data || []).forEach(r => {
+    items.push({
+      sortDate: r.fecha + ' ' + (r.hora_inicio || '00:00:00'),
+      html: `<div class="reg-item" style="cursor:pointer" onclick="mostrarDetalleHistorial('reparacion_goteo', ${r.id})">
+        <div class="reg-head">
+          <span class="badge" style="background:#E0F2FE;color:#075985">Reparación</span>
+          <span class="reg-fecha">${fmtFecha(r.fecha)}${r.hora_inicio ? ' · '+r.hora_inicio.substring(0,5) : ''}</span>
+        </div>
+        <div class="reg-finca">${r.finca}${r.lote_o_turno ? ' · '+r.lote_o_turno : ''}</div>
+        <div class="reg-meta">
+          ${r.avance_ha != null ? '<strong>'+r.avance_ha+'</strong> ha · ' : ''}${r.personal != null ? r.personal+' personas' : ''}
+        </div>
+        ${r.observaciones ? `<div class="reg-obs" style="font-size:11px;color:#6b7280;margin-top:4px;font-style:italic">"${r.observaciones}"</div>` : ''}
+      </div>`
+    });
+  });
+
+  items.sort((a,b) => b.sortDate.localeCompare(a.sortDate));
+  return items.map(i => i.html).join('');
+}
+
+
+/* ============================================================
+   CAPTURA: REPARACIÓN DE SISTEMA GOTEO (cód. 10704, 10706)
+============================================================ */
+
+let materialesReparacionCache = null;
+async function cargarMaterialesReparacion(){
+  if(materialesReparacionCache) return materialesReparacionCache;
+  const { data, error } = await sb.from('pm_materiales_reparacion_goteo')
+    .select('id, codigo, nombre, unidad')
+    .eq('activo', true)
+    .order('nombre');
+  materialesReparacionCache = (error ? [] : (data || []));
+  return materialesReparacionCache;
+}
+
+async function abrirCapturaReparacionGoteo(programacion){
+  const esProgramada = !!programacion;
+  window.__repProgramacion = programacion || null;
+  window.__repMateriales = [];
+
+  // Cargar fincas de la estación del operador
+  const estacionId = usuario.estacion_default;
+  if(!estacionId){
+    toast('Tu usuario no tiene estación asignada.', 'error');
+    return;
+  }
+  const { data: est } = await sb.from('pm_estaciones_riego')
+    .select('nombre').eq('id', estacionId).maybeSingle();
+  const nombreEst = est ? est.nombre : '';
+
+  const fincasEst = await cargarFincasEstacion(estacionId);
+  await cargarMaterialesReparacion();
+
+  // Resolver finca/lote desde programación
+  let preFinca = '';
+  let preLote = '';
+  if(esProgramada){
+    const fLote = programacion.finca_lote || '';
+    const m = fLote.match(/^([A-ZÁÉÍÓÚÑ\s]+)/i);
+    if(m){
+      const fincaCand = m[1].trim().toUpperCase();
+      const match = fincasEst.find(f => f.toUpperCase() === fincaCand);
+      if(match) preFinca = match;
+    }
+    const m2 = fLote.match(/\d+$/);
+    if(m2) preLote = m2[0];
+  }
+
+  const contextoBanner = esProgramada ? `
+    <div style="background:#E6F1FB;border-left:3px solid #185FA5;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.04em">Tarea programada</div>
+      <div style="font-size:13px;color:#185FA5;margin-top:4px">${actNombre(programacion.codigo_actividad)}</div>
+      ${preFinca ? `<div style="font-size:12px;color:#185FA5;margin-top:2px">${preFinca}${preLote ? ' · Lote '+preLote : ''}</div>` : ''}
+      ${programacion.horas_estimadas ? `<div style="font-size:12px;color:#185FA5;margin-top:2px"><i class="ti ti-clock"></i> ${programacion.horas_estimadas} horas estimadas de duración</div>` : ''}
+      ${programacion.observacion_plan ? `<div style="font-size:11px;color:#185FA5;margin-top:4px;font-style:italic">Nota del jefe: "${programacion.observacion_plan}"</div>` : ''}
+    </div>
+  ` : `
+    <div style="background:#FBF5E6;border-left:3px solid #BA7517;padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:600;color:#A06410;text-transform:uppercase;letter-spacing:0.04em">Captura libre</div>
+      <div style="font-size:12px;color:#A06410;margin-top:2px">${nombreEst} · Reparación espontánea</div>
+    </div>
+  `;
+
+  modalContent = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Reparación de goteo</h2>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:14px">cód. ${esProgramada ? programacion.codigo_actividad : '10704'}</div>
+    ${contextoBanner}
+
+    <div class="field">
+      <label>Finca</label>
+      <select id="repFinca">
+        <option value="">Seleccionar finca...</option>
+        ${fincasEst.map(f => `<option value="${f}" ${f === preFinca ? 'selected' : ''}>${f}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Lote / Turno</label>
+      <input type="text" id="repLoteTurno" value="${preLote ? 'Lote '+preLote : ''}" placeholder="Ej: Lote 3, o Turno 2"/>
+      <div class="field-help" style="font-size:11px;color:#6b7280;margin-top:4px">Puede ser lote (ej "Lote 5") o turno (ej "Turno 2")</div>
+    </div>
+
+    <div class="field">
+      <label>Fecha</label>
+      <input type="date" id="repFecha" value="${hoyISO()}"/>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hora inicio</label>
+        <input type="time" id="repHoraIni"/>
+      </div>
+      <div class="field">
+        <label>Hora fin</label>
+        <input type="time" id="repHoraFin"/>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Avance (ha)</label>
+        <input type="number" step="0.01" id="repAvanceHa" placeholder="0.00"/>
+      </div>
+      <div class="field">
+        <label>Personal</label>
+        <input type="number" id="repPersonal" placeholder="0"/>
+      </div>
+    </div>
+
+    <!-- BLOQUE MATERIALES -->
+    <div style="background:#F0F9FF;border:1px dashed #38BDF8;border-radius:8px;padding:12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;color:#075985;text-transform:uppercase;letter-spacing:0.04em">
+          <i class="ti ti-tools"></i> Materiales utilizados
+        </div>
+        <button type="button" onclick="agregarMaterialReparacion()"
+                style="padding:4px 10px;background:white;border:1px solid #38BDF8;color:#075985;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer">
+          + Agregar
+        </button>
+      </div>
+      <div id="repMaterialesLista" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div id="repMaterialesVacio" style="font-size:11px;color:#075985;opacity:0.6;text-align:center;padding:6px">
+        Sin materiales registrados
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="repObs" placeholder="Tipo de falla, ubicación específica..."></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="btnRep" onclick="guardarReparacionGoteo()">
+      <i class="ti ti-device-floppy"></i> Guardar reparación
+    </button>
+  `;
+
+  showModal();
+}
+
+function agregarMaterialReparacion(){
+  const mats = materialesReparacionCache || [];
+  if(mats.length === 0){
+    toast('No hay materiales configurados', 'error');
+    return;
+  }
+  const idx = window.__repMateriales.length;
+  window.__repMateriales.push({ material_id: null, cantidad: null });
+
+  const lista = document.getElementById('repMaterialesLista');
+  const vacio = document.getElementById('repMaterialesVacio');
+  vacio.style.display = 'none';
+
+  const item = document.createElement('div');
+  item.style.cssText = 'background:white;border:1px solid #38BDF8;border-radius:6px;padding:8px;display:flex;gap:6px;align-items:center';
+  item.id = 'repMat-' + idx;
+  item.innerHTML = `
+    <select onchange="onCambioMaterialReparacion(${idx}, this)"
+            style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px">
+      <option value="">Material...</option>
+      ${mats.map(m => `<option value="${m.id}" data-unidad="${m.unidad || ''}">${m.nombre}</option>`).join('')}
+    </select>
+    <input type="number" step="0.01" placeholder="Cant."
+           onchange="window.__repMateriales[${idx}].cantidad = this.value === '' ? null : parseFloat(this.value)"
+           style="width:80px;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px"/>
+    <span id="repMatUnidad-${idx}" style="font-size:11px;color:#6b7280;min-width:32px">—</span>
+    <button type="button" onclick="quitarMaterialReparacion(${idx})"
+            style="padding:6px 8px;background:white;border:1px solid #F87171;color:#7F1D1D;border-radius:6px;font-size:11px;cursor:pointer">
+      <i class="ti ti-x"></i>
+    </button>
+  `;
+  lista.appendChild(item);
+}
+
+function onCambioMaterialReparacion(idx, sel){
+  const matId = sel.value ? parseInt(sel.value) : null;
+  window.__repMateriales[idx].material_id = matId;
+  const opt = sel.options[sel.selectedIndex];
+  const unidad = opt ? opt.getAttribute('data-unidad') : '';
+  const unidadEl = document.getElementById('repMatUnidad-' + idx);
+  if(unidadEl) unidadEl.textContent = unidad || '—';
+}
+
+function quitarMaterialReparacion(idx){
+  window.__repMateriales[idx] = null;
+  const el = document.getElementById('repMat-' + idx);
+  if(el) el.remove();
+  const algunoVivo = window.__repMateriales.some(m => m !== null);
+  if(!algunoVivo){
+    document.getElementById('repMaterialesVacio').style.display = '';
+  }
+}
+
+async function guardarReparacionGoteo(){
+  const btn = document.getElementById('btnRep');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Guardando...';
+
+  try {
+    const finca = document.getElementById('repFinca').value;
+    const loteTurno = document.getElementById('repLoteTurno').value.trim() || null;
+    const fecha = document.getElementById('repFecha').value;
+    const horaIni = document.getElementById('repHoraIni').value || null;
+    const horaFin = document.getElementById('repHoraFin').value || null;
+    const avanceRaw = document.getElementById('repAvanceHa').value;
+    const personalRaw = document.getElementById('repPersonal').value;
+    const obs = document.getElementById('repObs').value.trim() || null;
+    const prog = window.__repProgramacion || null;
+    const esProgramada = !!prog;
+
+    if(!finca) throw new Error('Selecciona una finca');
+    if(!fecha) throw new Error('Indica la fecha');
+
+    const avance = avanceRaw === '' ? null : parseFloat(avanceRaw);
+    const personal = personalRaw === '' ? null : parseInt(personalRaw);
+
+    const payload = {
+      programacion_id: esProgramada ? prog.id : null,
+      finca,
+      lote_o_turno: loteTurno,
+      fecha,
+      hora_inicio: horaIni,
+      hora_fin: horaFin,
+      avance_ha: avance,
+      personal,
+      observaciones: obs,
+      fuera_de_plan: !esProgramada,
+      registrado_por: usuario.email,
+      dispositivo: navigator.userAgent.substring(0, 200)
+    };
+
+    // 1) Insertar reparación
+    const { data: insertados, error: e1 } = await sb.from('avc_riego_reparacion_goteo')
+      .insert(payload)
+      .select('id')
+      .single();
+    if(e1) throw new Error(e1.message);
+    const reparacionId = insertados.id;
+
+    // 2) Insertar materiales
+    const materiales = (window.__repMateriales || [])
+      .filter(m => m !== null && m.material_id && m.cantidad != null && m.cantidad > 0)
+      .map(m => ({
+        reparacion_id: reparacionId,
+        material_id: m.material_id,
+        cantidad: m.cantidad
+      }));
+    if(materiales.length > 0){
+      const { error: eMat } = await sb.from('avc_riego_reparacion_materiales').insert(materiales);
+      if(eMat) console.warn('Error guardando materiales:', eMat);
+    }
+
+    // 3) Cerrar tarea si era programada
+    if(esProgramada){
+      const { error: e2 } = await sb.from('avc_programacion')
+        .update({
+          estado: 'completada',
+          ha_real: avance,
+          personal_real: personal,
+          observacion_real: obs,
+          cerrado_por: usuario.email,
+          cerrado_en: new Date().toISOString()
+        })
+        .eq('id', prog.id);
+      if(e2) console.warn('No se pudo cerrar la programación:', e2);
+
+      try {
+        const { data: progActual } = await sb.from('avc_programacion')
+          .select('*').eq('id', prog.id).maybeSingle();
+        if(progActual && typeof notificarTareaCompletada === 'function'){
+          await notificarTareaCompletada(progActual);
+        }
+      } catch(_) {}
+    }
+
+    toast(esProgramada ? 'Reparación registrada y tarea completada' : 'Reparación registrada correctamente');
+    closeModal();
+    window.__repProgramacion = null;
+    window.__repMateriales = [];
+    routerPorRol();
+
+  } catch(err){
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Guardar reparación';
+  }
+}
+
+
+/* ============================================================
    VISTA: ADMIN (placeholder - puede elegir un rol para probar)
 ============================================================ */
 async function renderAdmin(){
@@ -2799,7 +6984,10 @@ async function renderAdmin(){
         <div class="card-title">Probar como otro rol</div>
         <button class="btn btn-primary" style="margin-bottom:8px" onclick="impersonar('jefe_distrito')">Vista Jefe (elegirás cuál)</button>
         <button class="btn btn-purple" style="margin-bottom:8px" onclick="impersonar('encargado_finca')">Vista Encargado</button>
-        <button class="btn btn-secondary" onclick="impersonar('supervisor_actividad')">Vista Supervisor</button>
+        <button class="btn btn-secondary" style="margin-bottom:8px" onclick="impersonar('supervisor_actividad')">Vista Supervisor</button>
+        <button class="btn btn-secondary" style="margin-bottom:8px" onclick="impersonar('operador_campo')">Vista Operador campo (humedad)</button>
+        <button class="btn btn-secondary" style="margin-bottom:8px" onclick="impersonar('digitador_riegos')">Vista Digitador riegos (caudales/aspersión/pivote/gravedad)</button>
+        <button class="btn btn-secondary" onclick="impersonar('operador_riegos')">Vista Operador riegos (goteo con turnos)</button>
       </div>
       <div class="card" style="margin-top:14px">
         <div class="card-title">Notas</div>
